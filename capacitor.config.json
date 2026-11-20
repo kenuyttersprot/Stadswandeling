@@ -1,0 +1,8 @@
+{
+  "appId": "be.dasbest.stadswandeling",
+  "appName": "Stadswandeling",
+  "webDir": "www",
+  "android": {
+    "useLegacyBridge": true
+  }
+}

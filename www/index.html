@@ -1,0 +1,970 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Stadswandeling</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#f6f1e9;--card:#fffdf9;--ink:#2a2420;--muted:#7a6f66;--line:#e6ddd0;--accent:#b8492f;--accent2:#2f6b5e;--chip:#efe6d8}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 Inter,system-ui,sans-serif}
+main{max-width:680px;margin:0 auto;padding:16px 14px 90px}
+h1{font-family:Fraunces,Georgia,serif;font-size:29px;line-height:1.1;margin:4px 0}
+h2{font-family:Fraunces,Georgia,serif;font-size:21px;margin:0 0 8px}
+.sub{color:var(--muted);margin:0 0 16px;font-size:15px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px;margin-bottom:14px}
+.lbl{display:block;font-weight:600;font-size:14px;margin:12px 0 6px}
+.lbl:first-child{margin-top:0}
+input[type=text],select{width:100%;font:inherit;padding:11px 12px;border:1px solid var(--line);border-radius:10px;background:#fff;color:var(--ink)}
+input:focus{outline:2px solid var(--accent2);border-color:transparent}
+.row{display:flex;gap:8px;align-items:flex-start}
+.wp{margin-bottom:8px}
+.ibtn{border:1px solid var(--line);background:#fff;border-radius:10px;width:40px;height:46px;font-size:16px;cursor:pointer;color:var(--ink);flex:none}
+.ibtn:disabled{opacity:.35}
+.addbtn{border:1px dashed var(--muted);background:transparent;border-radius:10px;padding:10px;width:100%;font:inherit;color:var(--muted);cursor:pointer}
+.slider{display:flex;align-items:center;gap:12px}
+.slider input{flex:1;accent-color:var(--accent)}
+.val{min-width:88px;text-align:right;font-weight:600}
+.hint{font-size:13px;color:var(--muted);margin-top:4px}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip{border:1px solid var(--line);background:var(--chip);border-radius:999px;padding:8px 13px;font:inherit;font-size:14px;cursor:pointer;color:var(--ink)}
+.chip[aria-pressed=true]{background:var(--accent2);border-color:var(--accent2);color:#fff}
+.primary{display:block;width:100%;border:0;border-radius:12px;background:var(--accent);color:#fff;font:600 17px Inter,sans-serif;padding:15px;cursor:pointer}
+.secondary{border:1px solid var(--line);background:#fff;border-radius:10px;padding:9px 13px;font:500 14px Inter,sans-serif;cursor:pointer;color:var(--ink);text-decoration:none;display:inline-flex;align-items:center;gap:6px}
+.btns{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+.err{background:#fbe9e4;border:1px solid #efc4b8;color:#7d2a17;border-radius:10px;padding:10px 12px;margin-top:12px;font-size:14px}
+.hidden{display:none!important}
+.loading{text-align:center;padding:26px 8px;color:var(--muted)}
+.spin{width:34px;height:34px;border:3px solid var(--line);border-top-color:var(--accent);border-radius:50%;margin:0 auto 12px;animation:s 1s linear infinite}
+@keyframes s{to{transform:rotate(360deg)}}
+/* autocomplete */
+.acwrap{position:relative;flex:1;min-width:0}
+.acwrap input{padding-right:36px}
+.acwrap.ok input{border-color:var(--accent2);background:#f3faf7}
+.acmark{position:absolute;right:12px;top:12px;color:var(--accent2)}
+.acsel{font-size:12.5px;color:var(--accent2);margin-top:3px}
+.acsel.muted{color:var(--muted)}
+.aclist{position:absolute;left:0;right:0;top:50px;background:#fff;border:1px solid var(--line);border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,.14);z-index:1000;overflow:hidden}
+.acitem{display:block;width:100%;text-align:left;border:0;border-top:1px solid var(--line);background:#fff;padding:10px 12px;font:inherit;cursor:pointer;color:var(--ink)}
+.acitem:first-child{border-top:0}
+.acitem:hover{background:var(--chip)}
+.acitem .t{font-weight:600;font-size:15px}
+.acitem .a{font-size:13px;color:var(--muted)}
+.acinfo{padding:10px 12px;font-size:13.5px;color:var(--muted)}
+.locbtn{margin-top:6px;font-size:13px;padding:6px 10px}
+/* result */
+#map{height:52vh;min-height:300px;border-radius:14px;border:1px solid var(--line);z-index:1}
+.stats{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0 2px}
+.stat{background:var(--chip);border-radius:10px;padding:5px 10px;font-size:14px}
+.note{font-size:14px;color:var(--muted);margin-top:6px}
+.walkbar{position:sticky;top:0;z-index:500;background:var(--accent2);color:#fff;border-radius:12px;padding:10px 14px;margin-bottom:12px;font-size:15px}
+.walkbar b{font-weight:600}
+.stop{border-top:1px solid var(--line);padding:13px 0}
+.stop:first-child{border-top:0;padding-top:2px}
+.stop.active{background:linear-gradient(90deg,rgba(184,73,47,.08),transparent);margin:0 -16px;padding-left:16px;padding-right:16px}
+.stop.done .num{opacity:.45}
+.shead{display:flex;gap:12px;align-items:flex-start;cursor:pointer}
+.num{flex:none;width:30px;height:30px;border-radius:50%;background:var(--accent);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:600;font-size:14px;margin-top:2px}
+.num.fixed{background:var(--accent2)}
+.sname{font-weight:600;font-size:17px;line-height:1.3}
+.smeta{font-size:13px;color:var(--muted)}
+.sbody{margin:8px 0 0 42px;display:none}
+.stop.open .sbody{display:block}
+.stext{white-space:pre-wrap;font-size:15.5px}
+.src{font-size:12.5px;color:var(--muted);margin-top:6px}
+.src a{color:var(--muted)}
+.speaking{background:var(--accent2)!important;color:#fff!important;border-color:var(--accent2)!important}
+.mk{width:28px;height:28px;border-radius:50%;background:var(--accent);color:#fff;font:600 13px Inter,sans-serif;display:flex;align-items:center;justify-content:center;border:2.5px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.35)}
+.mk.fixed{background:var(--accent2)}
+.mk.done{opacity:.5}
+.me{width:16px;height:16px;border-radius:50%;background:#1a73e8;border:3px solid #fff;box-shadow:0 0 0 6px rgba(26,115,232,.25)}
+.toplink{color:var(--muted);font-size:14px;background:none;border:0;padding:0;cursor:pointer;text-decoration:underline;font:inherit}
+.switch{display:flex;align-items:center;gap:10px;font-size:15px;margin-top:10px}
+.switch input{width:20px;height:20px;accent-color:var(--accent2)}
+body.dark{--bg:#0f0d0c;--card:#1a1715;--ink:#e9e2d8;--muted:#9a8f85;--line:#2e2925;--chip:#2a2522}
+body.dark input[type=text],body.dark select,body.dark .secondary,body.dark .ibtn,body.dark .acitem,body.dark .aclist{background:#221e1b;color:var(--ink)}
+body.dark .leaflet-tile-pane{filter:brightness(.55) contrast(1.15)}
+.prog{height:8px;background:var(--line);border-radius:4px;overflow:hidden;margin-top:8px}
+.prog>div{height:100%;width:0;background:var(--accent2);transition:width .3s}
+</style>
+</head>
+<body>
+<main>
+  <div id="fatal" class="err hidden" style="margin:0 0 12px"></div>
+  <h1>Stadswandeling</h1>
+  <p class="sub">Van A naar B langs de mooiste plekken, op jouw tempo. Met kaart, GPS en voorgelezen uitleg.</p>
+
+  <section id="planner">
+    <div class="card">
+      <label class="lbl" for="start">Vertrekpunt</label>
+      <input type="text" id="start" placeholder="Naam, straat of adres">
+      <button class="secondary locbtn" id="myloc" type="button">📍 Mijn huidige locatie</button>
+
+      <label class="lbl">Tussenpunten <span style="font-weight:400;color:var(--muted)">(optioneel, in volgorde)</span></label>
+      <div id="wps"></div>
+      <button class="addbtn" id="addwp" type="button">+ Tussenpunt toevoegen</button>
+
+      <label class="lbl" for="end">Eindpunt</label>
+      <input type="text" id="end" placeholder="Naam, straat of adres">
+    </div>
+
+    <div class="card">
+      <label class="lbl" for="dur">Duur van de wandeling</label>
+      <div class="slider"><input type="range" id="dur" min="30" max="300" step="15" value="150"><span class="val" id="durv"></span></div>
+      <label class="lbl" for="spd">Gemiddeld tempo</label>
+      <div class="slider"><input type="range" id="spd" min="2" max="4" step="0.1" value="2.8"><span class="val" id="spdv"></span></div>
+      <div class="hint">Inclusief stilstaan, kijken en foto's nemen. 2,5–3 km/u is een rustig bezichtigingstempo.</div>
+      <div class="hint" id="kmhint"></div>
+    </div>
+
+    <div class="card">
+      <label class="lbl">Wat interesseert jullie?</label>
+      <div class="chips" id="chips"></div>
+    </div>
+
+    <button class="primary" id="go" type="button">Plan de wandeling</button>
+    <div id="perr" class="err hidden"></div>
+  </section>
+
+  <section id="loading" class="card hidden">
+    <div class="loading"><div class="spin"></div><div id="lmsg">Bezig…</div></div>
+    <ol id="steps" style="font-size:14px;color:var(--muted);margin:0 0 12px;padding-left:22px"></ol>
+    <button class="secondary" id="cancel" type="button">Annuleren</button>
+  </section>
+
+  <section id="result" class="hidden">
+    <div id="walkbar" class="walkbar hidden"></div>
+    <div class="card">
+      <button class="toplink" id="back" type="button">← Instellingen aanpassen</button>
+      <h2 id="rtitle" style="margin-top:8px">Jullie wandeling</h2>
+      <div class="stats" id="rstats"></div>
+      <div class="note" id="rnote"></div>
+      <div class="btns">
+        <button class="primary" id="startwalk" type="button" style="width:auto;padding:11px 18px;font-size:15px">▶ Start wandeling (GPS)</button>
+        <button class="secondary" id="regen" type="button">↻ Andere route</button>
+        <button class="secondary" id="gpx" type="button">🗺️ Exporteren voor OsmAnd (GPX)</button>
+      </div>
+      <label class="switch"><input type="checkbox" id="autoplay" checked> Automatisch voorlezen bij aankomst</label>
+      <label class="switch"><input type="checkbox" id="saver" checked> Spaarstand (scherm mag uit, donkere weergave)</label>
+      <div class="hint" id="saverhint"></div>
+    </div>
+
+    <div class="card" id="impcard">
+      <h2 style="font-size:18px">📥 Route importeren</h2>
+      <div class="hint" style="font-size:14px">Zet alle teksten, het volledige "Vertel meer"-verhaal en de stem vooraf op je toestel. Doe dit in het hotel, via wifi en met je gsm aan de lader. Onderweg moet er dan niets meer berekend of gedownload worden.</div>
+      <div id="impstat" style="font-size:14px;margin-top:8px"></div>
+      <div class="prog hidden" id="impprog"><div></div></div>
+      <div class="btns"><button class="primary" id="impbtn" type="button" style="width:auto;padding:11px 18px;font-size:15px">📥 Route importeren</button><button class="secondary hidden" id="impstop" type="button">Stoppen</button></div>
+    </div>
+
+    <div class="card" style="padding:8px"><div id="map"></div></div>
+
+    <div class="card">
+      <label class="lbl" for="voice">Voorleesstem</label>
+      <div class="row"><select id="voice" style="flex:1"></select><button class="secondary" id="vtest" type="button">▶ Test</button></div>
+      <div class="slider" style="margin-top:10px"><span style="font-size:14px">Tempo</span><input type="range" id="vrate" min="0.7" max="1.3" step="0.05" value="1"><span class="val" id="vratev"></span></div>
+      <div class="hint" id="vhint"></div>
+      <div id="aistat" class="hidden" style="margin-top:10px;font-size:14px"><div id="aitxt"></div><div class="btns"><button class="secondary" id="aidl" type="button">⬇ Stem downloaden</button></div></div>
+    </div>
+
+    <div class="card" id="stops"></div>
+    <div class="hint" style="text-align:center">Kaart © OpenStreetMap-bijdragers · Route: OSRM · Teksten: Wikipedia (CC BY-SA)</div>
+  </section>
+</main>
+
+<script>
+(function(){
+"use strict";
+/* ================= config ================= */
+const PHOTON="https://photon.komoot.io/api/";
+const OSRM="https://routing.openstreetmap.de/routed-foot/route/v1/driving/";
+const OVERPASS=["https://overpass-api.de/api/interpreter","https://overpass.kumi.systems/api/interpreter","https://maps.mail.ru/osm/tools/overpass/api/interpreter"];
+const INTERESTS=["Architectuur","Kerken","Musea & kunst","Geschiedenis","Pleinen & parken","Verborgen plekjes","Street art","Uitzichten","Koffie & aperitivo"];
+const ARRIVE_M=35;
+
+const $=id=>document.getElementById(id);
+const store={get(k){try{return JSON.parse(localStorage.getItem("sw2_"+k));}catch(e){return null;}},set(k,v){try{localStorage.setItem("sw2_"+k,JSON.stringify(v));}catch(e){}}};
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+let stepT0=0,curStep=null,planAbort=null;
+function step(t){ // sluit vorige stap af en start nieuwe
+  const now=Date.now();
+  if(curStep){curStep.textContent="✓ "+curStep.dataset.t+" ("+((now-stepT0)/1000).toFixed(1)+" s)";}
+  stepT0=now;const li=document.createElement("li");li.dataset.t=t;li.textContent="… "+t;$("steps").append(li);curStep=li;$("lmsg").textContent=t;
+}
+function stepFail(why){if(curStep){curStep.textContent="✗ "+curStep.dataset.t+": "+why;curStep.style.color="#7d2a17";curStep=null;}}
+function stepNote(t){if(curStep)curStep.textContent="… "+curStep.dataset.t+" ("+t+")";}
+function fatal(m){const f=$("fatal");f.textContent="Er ging iets mis: "+m;f.classList.remove("hidden");}
+window.addEventListener("error",e=>fatal((e.message||"onbekende fout")+(e.lineno?" (regel "+e.lineno+")":"")));
+window.addEventListener("unhandledrejection",e=>fatal(String(e.reason&&e.reason.message||e.reason)));
+function hav(a,b){const R=6371,r=x=>x*Math.PI/180,dLa=r(b.lat-a.lat),dLo=r(b.lon-a.lon);const h=Math.sin(dLa/2)**2+Math.cos(r(a.lat))*Math.cos(r(b.lat))*Math.sin(dLo/2)**2;return 2*R*Math.asin(Math.sqrt(h));}
+function spokenKm(k){return k<1?(Math.round(k*20)*50)+" meter":(Math.round(k*10)/10).toString().replace(".00","").replace("."," komma ")+" kilometer";}
+function fmtKm(k){return k<1?Math.round(k*1000)+" m":k.toFixed(1).replace(".",",")+" km";}
+function fmtDur(m){const h=Math.floor(m/60),r=Math.round(m%60);return h?h+" u"+(r?" "+r:""):r+" min";}
+async function getJSON(url,opt,ms){const c=new AbortController();const t=setTimeout(()=>c.abort(),ms||20000);if(planAbort)planAbort.signal.addEventListener("abort",()=>c.abort());try{const r=await fetch(url,Object.assign({signal:c.signal},opt||{}));if(!r.ok)throw new Error("HTTP "+r.status);return await r.json();}finally{clearTimeout(t);}}
+
+/* ================= state ================= */
+let state={start:{text:"",sel:null},end:{text:"",sel:null},waypoints:[],interests:new Set(["Architectuur","Kerken","Geschiedenis","Pleinen & parken"])};
+let route=null, map=null, layers=null, meMarker=null, watchId=null, wakeLock=null, lastPos=null;
+
+/* ================= autocomplete (Photon / OpenStreetMap) ================= */
+function biasPoint(){
+  const pts=[state.start,state.end,...state.waypoints].map(m=>m.sel).filter(Boolean);
+  if(pts.length) return pts[0];
+  return lastPos||null;
+}
+function photonLabel(p){
+  const pr=p.properties||{};
+  let street=[pr.street,pr.housenumber].filter(Boolean).join(" ");
+  if(pr.name&&street===pr.name)street="";
+  const place=[pr.postcode,pr.city||pr.town||pr.village||pr.county].filter(Boolean).join(" ");
+  const addr=[street,place,pr.country].filter(Boolean).join(", ");
+  const name=pr.name||street||place||"Onbekend";
+  const kind=TYPE_NL[pr.osm_value]||TYPE_NL[pr.osm_key]||"";
+  return {name, address:addr, kind, lat:p.geometry.coordinates[1], lon:p.geometry.coordinates[0]};
+}
+function makeAC(input,model){
+  const w=document.createElement("div");w.className="acwrap";
+  input.parentNode.insertBefore(w,input);w.append(input);
+  const mark=document.createElement("span");mark.className="acmark";
+  const selLine=document.createElement("div");selLine.className="acsel";
+  const list=document.createElement("div");list.className="aclist hidden";
+  list.addEventListener("mousedown",e=>e.preventDefault());
+  w.append(mark,selLine,list);
+  input.setAttribute("autocomplete","off");input.value=model.text||"";
+  let timer=null,ctrl=null,seq=0;
+  function refresh(){w.classList.toggle("ok",!!model.sel);mark.textContent=model.sel?"✓":"";
+    selLine.className="acsel"+(model.sel?"":" muted");
+    selLine.textContent=model.sel?(model.sel.address||model.sel.name):(model.text.trim()?"Kies een suggestie uit de lijst":"");}
+  function hide(){list.classList.add("hidden");}
+  function info(t){list.innerHTML='<div class="acinfo"></div>';list.firstChild.textContent=t;list.classList.remove("hidden");}
+  function choose(s){model.sel=s;model.text=s.name;input.value=s.name;hide();refresh();save();}
+  model._choose=choose;
+  async function search(){
+    const q=input.value.trim(); if(q.length<2){hide();return;}
+    if(ctrl)ctrl.abort();ctrl=new AbortController();const my=++seq;
+    info("Zoeken…");
+    try{
+      const b=biasPoint();
+      let url=PHOTON+"?limit=7&q="+encodeURIComponent(q);
+      if(b) url+="&lat="+b.lat+"&lon="+b.lon;
+      let slow=false;const myc=ctrl;const tm=setTimeout(()=>{slow=true;myc.abort();},12000);
+      let j; try{const r=await fetch(url,{signal:ctrl.signal}); j=await r.json();}finally{clearTimeout(tm);}
+      if(my!==seq)return;
+      const items=(j.features||[]).map(photonLabel);
+      list.innerHTML="";
+      if(!items.length){info("Niets gevonden. Probeer met straat of gemeente erbij, bv. 'Kerkstraat Lede'.");return;}
+      items.forEach(s=>{const bt=document.createElement("button");bt.type="button";bt.className="acitem";
+        bt.innerHTML='<div class="t"></div><div class="a"></div>';bt.querySelector(".t").textContent=s.name;
+        bt.querySelector(".a").textContent=[s.kind,s.address].filter(Boolean).join(" · ");
+        bt.onclick=()=>choose(s);list.append(bt);});
+      list.classList.remove("hidden");
+    }catch(e){ if(my!==seq)return; if(e.name==="AbortError"&&!slow)return; info(slow?"De zoekdienst antwoordt niet. Probeer het zo meteen opnieuw.":"Zoeken lukte niet ("+(e.message||e)+"). Controleer je internetverbinding."); }
+  }
+  input.addEventListener("input",()=>{model.text=input.value;model.sel=null;refresh();save();clearTimeout(timer);timer=setTimeout(search,350);});
+  input.addEventListener("focus",()=>{if(!model.sel&&input.value.trim().length>=2)search();});
+  input.addEventListener("blur",()=>setTimeout(hide,150));
+  input.addEventListener("keydown",e=>{if(e.key==="Escape")hide();if(e.key==="Enter"){e.preventDefault();const f=list.querySelector(".acitem");if(f&&!list.classList.contains("hidden"))f.click();}});
+  refresh();
+}
+
+/* ================= form ================= */
+function renderWps(){
+  const box=$("wps");box.innerHTML="";
+  state.waypoints.forEach((w,i)=>{
+    const d=document.createElement("div");d.className="row wp";
+    const inp=document.createElement("input");inp.type="text";inp.placeholder="Tussenpunt "+(i+1);
+    d.append(inp);makeAC(inp,w);
+    const mk=(t,fn,lbl)=>{const b=document.createElement("button");b.type="button";b.className="ibtn";b.textContent=t;b.onclick=fn;b.setAttribute("aria-label",lbl);return b;};
+    const swap=(a,b)=>{const W=state.waypoints;[W[a],W[b]]=[W[b],W[a]];renderWps();save();};
+    const up=mk("↑",()=>swap(i,i-1),"Omhoog");up.disabled=i===0;
+    const dn=mk("↓",()=>swap(i,i+1),"Omlaag");dn.disabled=i===state.waypoints.length-1;
+    const rm=mk("✕",()=>{state.waypoints.splice(i,1);renderWps();save();},"Verwijderen");
+    d.append(up,dn,rm);box.append(d);
+  });
+}
+$("addwp").onclick=()=>{state.waypoints.push({text:"",sel:null});renderWps();const ins=$("wps").querySelectorAll("input");ins[ins.length-1].focus();};
+function renderChips(){const box=$("chips");box.innerHTML="";INTERESTS.forEach(t=>{const b=document.createElement("button");b.type="button";b.className="chip";b.textContent=t;b.setAttribute("aria-pressed",state.interests.has(t));b.onclick=()=>{state.interests.has(t)?state.interests.delete(t):state.interests.add(t);b.setAttribute("aria-pressed",state.interests.has(t));save();};box.append(b);});}
+function updSliders(){const m=+$("dur").value,v=+$("spd").value;$("durv").textContent=fmtDur(m);$("spdv").textContent=v.toFixed(1).replace(".",",")+" km/u";$("kmhint").textContent="Dat is ongeveer "+fmtKm(m/60*v)+" wandelen.";}
+["dur","spd"].forEach(id=>$(id).addEventListener("input",()=>{updSliders();save();}));
+function clean(m){return {text:m.text,sel:m.sel};}
+function save(){store.set("form",{start:clean(state.start),end:clean(state.end),wps:state.waypoints.map(clean),dur:$("dur").value,spd:$("spd").value,ints:[...state.interests]});}
+function load(){
+  const f=store.get("form");
+  if(f){const m=v=>v&&typeof v==="object"?{text:String(v.text||""),sel:v.sel||null}:{text:"",sel:null};
+    state.start=m(f.start);state.end=m(f.end);state.waypoints=(f.wps||[]).map(m);
+    if(f.dur)$("dur").value=f.dur;if(f.spd)$("spd").value=f.spd;if(Array.isArray(f.ints))state.interests=new Set(f.ints);}
+  makeAC($("start"),state.start);makeAC($("end"),state.end);renderWps();renderChips();updSliders();
+  const r=store.get("route");if(r&&r.stops){route=r;showResult();}
+}
+$("myloc").onclick=()=>{
+  if(!navigator.geolocation){showErr("Je toestel geeft geen locatie door.");return;}
+  $("myloc").textContent="📍 Locatie zoeken…";
+  navigator.geolocation.getCurrentPosition(p=>{
+    const s={name:"Mijn locatie",address:"GPS-positie",lat:p.coords.latitude,lon:p.coords.longitude};
+    lastPos=s;state.start._choose(s);$("myloc").textContent="📍 Mijn huidige locatie";
+  },()=>{$("myloc").textContent="📍 Mijn huidige locatie";showErr("Locatie niet beschikbaar. Geef de app toestemming om je locatie te gebruiken.");},{enableHighAccuracy:true,timeout:15000});
+};
+
+/* ================= POI categorisation ================= */
+const TYPE_NL={museum:"museum",gallery:"galerie",artwork:"kunstwerk",viewpoint:"uitzichtpunt",attraction:"bezienswaardigheid",place_of_worship:"gebedshuis",church:"kerk",chapel:"kapel",cathedral:"kathedraal",castle:"kasteel",ruins:"ruïne",monument:"monument",memorial:"gedenkteken",city_gate:"stadspoort",manor:"landhuis",archaeological_site:"archeologische site",building:"historisch gebouw",windmill:"windmolen",watermill:"watermolen",tower:"toren",park:"park",garden:"tuin",square:"plein",cafe:"café",bar:"bar",hotel:"hotel",restaurant:"restaurant",station:"station",fort:"fort",wayside_shrine:"kapelletje",wayside_cross:"wegkruis",fountain:"fontein",palace:"paleis",theatre:"theater",townhall:"stadhuis",street:"straat",residential:"straat",house:"adres",city:"stad",town:"gemeente",village:"dorp"};
+function catsOf(t){
+  const c=new Set();
+  if(t.tourism==="museum"||t.tourism==="gallery")c.add("Musea & kunst");
+  if(t.tourism==="artwork"){ if(/mural|graffiti/.test(t.artwork_type||""))c.add("Street art"); else {c.add("Musea & kunst");c.add("Verborgen plekjes");} }
+  if(t.amenity==="place_of_worship"||/^(church|chapel|cathedral|basilica)$/.test(t.building||""))c.add("Kerken");
+  if(t.historic){ c.add("Geschiedenis"); if(/^(castle|building|manor|palace|city_gate|tower|church|fort)$/.test(t.historic))c.add("Architectuur"); if(/^(wayside_shrine|wayside_cross|boundary_stone|milestone|memorial)$/.test(t.historic))c.add("Verborgen plekjes"); }
+  if(/^(castle|palace|cathedral)$/.test(t.building||""))c.add("Architectuur");
+  if(t.man_made){c.add("Verborgen plekjes");c.add("Geschiedenis");}
+  if(t.leisure==="park"||t.leisure==="garden"||t.place==="square")c.add("Pleinen & parken");
+  if(t.tourism==="viewpoint")c.add("Uitzichten");
+  if(t.amenity==="cafe"||t.amenity==="bar")c.add("Koffie & aperitivo");
+  if(t.amenity==="townhall"||t.amenity==="theatre"||t.amenity==="fountain")c.add("Architectuur");
+  if(t.tourism==="attraction"&&!c.size)c.add("Architectuur");
+  if(t.heritage||t["heritage:operator"])c.add("Architectuur");
+  return [...c];
+}
+function typeOf(t){return TYPE_NL[t.historic]||TYPE_NL[t.tourism]||TYPE_NL[t.building]||TYPE_NL[t.man_made]||TYPE_NL[t.leisure]||TYPE_NL[t.place]||TYPE_NL[t.amenity]||"bezienswaardigheid";}
+function scoreOf(t,cats,ints){
+  if(t.historic==="memorial"&&/plaque|stolperstein|blue_plaque/.test(t.memorial||""))return 0;
+  const cafe=t.amenity==="cafe"||t.amenity==="bar";
+  if(cafe&&!ints.has("Koffie & aperitivo"))return 0;
+  let s=1;
+  if(cats.some(c=>ints.has(c)))s+=4; else if(ints.size)s-=0.5;
+  if(t.wikipedia||t.wikidata)s+=3;
+  if(t.tourism==="attraction"||t.tourism==="museum")s+=1;
+  if(t.heritage)s+=1;
+  if(cafe)s-=1.5;
+  return Math.max(s,0);
+}
+
+/* ================= planning ================= */
+async function overpass(bbox,ints){
+  const b=bbox.join(",");
+  const cafe=ints.has("Koffie & aperitivo")?`nwr["amenity"~"^(cafe|bar)$"]["name"](${b});`:"";
+  const q=`[out:json][timeout:25];(
+nwr["tourism"~"^(attraction|museum|gallery|artwork|viewpoint)$"]["name"](${b});
+nwr["historic"]["name"](${b});
+nwr["amenity"~"^(place_of_worship|townhall|theatre|fountain)$"]["name"](${b});
+nwr["building"~"^(church|chapel|cathedral|castle|palace)$"]["name"](${b});
+nwr["man_made"~"^(windmill|watermill|tower|lighthouse)$"]["name"](${b});
+nwr["leisure"~"^(park|garden)$"]["name"](${b});
+nwr["place"="square"]["name"](${b});
+${cafe}
+);out center tags 700;`;
+  let lastErr;
+  for(const ep of OVERPASS){
+    try{ return await getJSON(ep,{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:"data="+encodeURIComponent(q)},20000); }
+    catch(e){lastErr=e; if(planAbort&&planAbort.signal.aborted)throw e; stepNote("server "+(OVERPASS.indexOf(ep)+1)+" reageerde niet, volgende proberen");}
+  }
+  throw lastErr||new Error("Overpass");
+}
+async function osrm(points){
+  const coords=points.map(p=>p.lon.toFixed(6)+","+p.lat.toFixed(6)).join(";");
+  const j=await getJSON(OSRM+coords+"?overview=full&geometries=geojson&steps=true",null,25000);
+  if(j.code!=="Ok"||!j.routes||!j.routes[0])throw new Error("Geen route");
+  const r=j.routes[0];
+  const steps=[];
+  r.legs.forEach((l,li)=>(l.steps||[]).forEach(s=>{const m=s.maneuver||{};if(!m.location)return;
+    steps.push({lat:m.location[1],lon:m.location[0],type:m.type||"",mod:m.modifier||"",exit:m.exit||0,name:s.name||"",leg:li});}));
+  return {km:r.distance/1000,geom:r.geometry.coordinates.map(c=>[c[1],c[0]]),legs:r.legs.map(l=>l.distance/1000),steps};
+}
+function rawKm(seq){let s=0;for(let i=1;i<seq.length;i++)s+=hav(seq[i-1],seq[i]);return s;}
+function greedyFill(seq,cands,targetKm,f,maxSights){
+  // seq: array of points; inserts cands while estimated distance stays under targetKm
+  let est=rawKm(seq)*f;
+  let n=seq.filter(p=>p.kind==="sight").length;
+  const used=new Set(seq.map(p=>p.id).filter(Boolean));
+  while(n<maxSights){
+    let best=null;
+    for(const c of cands){
+      if(used.has(c.id)||c.score<=0)continue;
+      if(seq.some(p=>hav(p,c)<0.07))continue;
+      let bi=-1,badd=1e9;
+      for(let i=0;i<seq.length-1;i++){const add=hav(seq[i],c)+hav(c,seq[i+1])-hav(seq[i],seq[i+1]);if(add<badd){badd=add;bi=i;}}
+      if(est+badd*f>targetKm)continue;
+      const v=c.score/(badd*f+0.12);
+      if(!best||v>best.v)best={c,i:bi,add:badd,v};
+    }
+    if(!best)break;
+    seq.splice(best.i+1,0,best.c);used.add(best.c.id);est+=best.add*f;n++;
+  }
+  return seq;
+}
+function removeWeakest(seq,f){
+  let wi=-1,wv=1e9;
+  for(let i=1;i<seq.length-1;i++){const p=seq[i];if(p.kind!=="sight")continue;
+    const save=hav(seq[i-1],p)+hav(p,seq[i+1])-hav(seq[i-1],seq[i+1]);const v=p.score/(save*f+0.12);if(v<wv){wv=v;wi=i;}}
+  if(wi>0){seq.splice(wi,1);return true;}return false;
+}
+
+async function plan(alt){
+  hideErr();
+  const pts=[state.start,...state.waypoints.filter(w=>w.text.trim()),state.end];
+  if(!state.start.sel||!state.end.sel){showErr("Kies een vertrek- en eindpunt uit de suggestielijst.");return;}
+  const missing=pts.findIndex(p=>!p.sel);
+  if(missing>=0){showErr("Tussenpunt '"+pts[missing].text+"' is niet gekozen uit de lijst. Kies een suggestie of verwijder het.");return;}
+  save();stopSpeaking();stopWalk();$("steps").innerHTML="";curStep=null;$("fatal").classList.add("hidden");show("loading");
+  planAbort=new AbortController();const pa=planAbort;
+  const overall=setTimeout(()=>pa.abort(),120000);
+  const mins=+$("dur").value,spd=+$("spd").value,target=mins/60*spd;
+  const ints=new Set(state.interests);
+  const fixed=pts.map((p,i)=>({lat:p.sel.lat,lon:p.sel.lon,name:p.sel.name,address:p.sel.address,kind:i===0?"start":i===pts.length-1?"end":"waypoint",fixed:true}));
+  try{
+    step("Basisroute berekenen");
+    let base;
+    try{base=await osrm(fixed);}catch(e){if(pa.signal.aborted)throw e;stepFail("routeplanner niet bereikbaar, ik gebruik een schatting");base={km:rawKm(fixed)*1.3,geom:null};}
+    let f=Math.max(1.1,Math.min(1.8,base.km/Math.max(rawKm(fixed),0.05)));
+    const spare=Math.max(0,target-base.km);
+    // zoekgebied
+    const lats=fixed.map(p=>p.lat),lons=fixed.map(p=>p.lon);
+    const bufKm=Math.min(2.2,Math.max(0.5,spare/2.5));
+    const dLat=bufKm/111,dLon=bufKm/(111*Math.cos(lats[0]*Math.PI/180));
+    const bbox=[Math.min(...lats)-dLat,Math.min(...lons)-dLon,Math.max(...lats)+dLat,Math.max(...lons)+dLon].map(x=>+x.toFixed(5));
+    step("Bezienswaardigheden zoeken");
+    let cands=[];
+    try{
+      const j=await overpass(bbox,ints);
+      const seen=new Map();
+      (j.elements||[]).forEach(e=>{
+        const t=e.tags||{};const lat=e.lat??(e.center&&e.center.lat),lon=e.lon??(e.center&&e.center.lon);
+        if(lat==null||!t.name)return;
+        const cats=catsOf(t);let score=scoreOf(t,cats,ints);
+        if(alt)score*=0.4+Math.random()*1.2;
+        const key=t.name.toLowerCase();
+        const c={id:e.type+e.id,lat,lon,name:t.name,tags:t,cats,score,kind:"sight",type:typeOf(t)};
+        const prev=seen.get(key);
+        if(prev&&hav(prev,c)<0.3){ if(c.score>prev.score)seen.set(key,c); } else seen.set(key+(prev?e.id:""),c);
+      });
+      cands=[...seen.values()].filter(c=>c.score>0);
+      stepNote(cands.length+" gevonden");
+    }catch(e){ if(pa.signal.aborted)throw e; stepFail("kaartgegevens niet bereikbaar, ik ga verder zonder"); }
+    const maxSights=Math.max(3,Math.min(20,Math.round(mins/10)));
+    let seq=greedyFill(fixed.slice(),cands,target,f,maxSights);
+    step("Wandelroute uitrekenen");
+    let rt=null;
+    for(let it=0;it<5;it++){
+      try{rt=await osrm(seq);}catch(e){if(pa.signal.aborted)throw e;stepFail("routeplanner niet bereikbaar");rt=null;break;}
+      const rk=rawKm(seq); if(rk>0.05) f=Math.max(1.05,Math.min(2,rt.km/rk));
+      if(rt.km>target*1.12&&removeWeakest(seq,f))continue;
+      if(rt.km<target*0.85&&it<3){const before=seq.length;seq=greedyFill(seq,cands,target,f,maxSights);if(seq.length>before)continue;}
+      break;
+    }
+    if(!rt){rt={km:rawKm(seq)*f,geom:null,legs:null,approx:true};}
+    step("Uitleg ophalen");
+    const stops=seq.map(p=>({name:p.name,lat:p.lat,lon:p.lon,kind:p.kind,type:p.type||"",cats:p.cats||[],address:p.address||"",tags:p.tags||{},text:"",lang:"nl",src:null}));
+    await addTexts(stops);
+    step("Kaart tekenen");
+    route={stops,km:rt.km,geom:rt.geom,legs:rt.legs||null,steps:rt.steps||[],approx:!!rt.approx,target,mins,spd,poiCount:cands.length,done:[]};
+    store.set("route",route);
+    showResult();
+  }catch(e){
+    const why=pa.signal.aborted?(pa.userCancel?"geannuleerd":"het duurde langer dan 2 minuten"):(e&&e.message||String(e));
+    stepFail(why);
+    const log=[...$("steps").children].map(li=>li.textContent).join(" · ");
+    show("planner");showErr("Plannen mislukte: "+why+". Verloop: "+log);
+  }finally{clearTimeout(overall);planAbort=null;}
+}
+function msg(t){$("lmsg").textContent=t;}
+
+/* ================= texts (Wikipedia + OSM) ================= */
+async function wikiExtracts(lang,titles,full){
+  const out={};
+  for(let i=0;i<titles.length;i+=20){
+    const chunk=titles.slice(i,i+20);
+    const url=`https://${lang}.wikipedia.org/w/api.php?action=query&prop=extracts${full?"":"&exintro=1"}&explaintext=1&exlimit=20&redirects=1&format=json&origin=*&titles=`+encodeURIComponent(chunk.join("|"));
+    try{
+      const j=await getJSON(url,null,15000);const q=j.query||{};
+      const map={};(q.normalized||[]).forEach(n=>map[n.from]=n.to);(q.redirects||[]).forEach(n=>map[n.from]=n.to);
+      const pages=Object.values(q.pages||{});
+      chunk.forEach(t=>{let tt=map[t]||t;tt=map[tt]||tt;const p=pages.find(p=>p.title===tt);if(p&&p.extract)out[t]={title:p.title,text:p.extract};});
+    }catch(e){}
+  }
+  return out;
+}
+function trimText(t,max){
+  t=t.replace(/\n{2,}/g,"\n").replace(/\s*\([^)]*\)\s*/g,m=>m.length>60?" ":m).trim();
+  if(t.length<=max)return t;
+  const cut=t.slice(0,max);const i=Math.max(cut.lastIndexOf(". "),cut.lastIndexOf(".\n"));
+  return (i>max*0.4?cut.slice(0,i+1):cut+"…").trim();
+}
+function tagText(s){
+  const t=s.tags||{};let parts=[];
+  if(s.kind==="start")return "Hier begint jullie wandeling"+(s.address?" ("+s.address+")":"")+". Veel plezier!";
+  if(s.kind==="end")return "Jullie eindpunt: "+s.name+(s.address?", "+s.address:"")+". Einde van de wandeling, geniet ervan!";
+  if(s.kind==="waypoint")return "Tussenstop: "+s.name+(s.address?", "+s.address:"")+".";
+  parts.push(s.name+" is een "+(s.type||"bezienswaardigheid")+".");
+  const d=t["description:nl"]||t.description; if(d)parts.push(d.endsWith(".")?d:d+".");
+  const sd=t.start_date||t["construction_date"]; if(sd)parts.push("Het dateert van "+sd.replace(/^~?C(\d+)/,"de $1e eeuw")+".");
+  if(t.architect)parts.push("Ontworpen door "+t.architect+".");
+  if(t.artist_name)parts.push("Gemaakt door "+t.artist_name+".");
+  if(t.denomination==="catholic"||t.religion==="christian")parts.push(t.denomination==="catholic"?"Het is een katholiek gebedshuis.":"");
+  if(t.heritage)parts.push("Het is beschermd erfgoed.");
+  if(t["inscription"])parts.push("Opschrift: "+t.inscription+".");
+  return parts.filter(Boolean).join(" ");
+}
+async function addTexts(stops){
+  const sights=stops.filter(s=>s.kind==="sight");
+  // 1. wikipedia-tag
+  const byLang={};
+  sights.forEach(s=>{const w=s.tags.wikipedia;if(w&&w.includes(":")){const [l,...r]=w.split(":");s._wl=l;s._wt=r.join(":");(byLang[l]=byLang[l]||[]).push(s._wt);}});
+  // 2. wikidata -> sitelinks (voorkeur nl)
+  const qids=sights.filter(s=>s.tags.wikidata).map(s=>s.tags.wikidata);
+  if(qids.length){
+    for(let i=0;i<qids.length;i+=40){
+      try{
+        const j=await getJSON("https://www.wikidata.org/w/api.php?action=wbgetentities&props=sitelinks&sitefilter=nlwiki|enwiki|itwiki|frwiki|dewiki|eswiki&format=json&origin=*&ids="+qids.slice(i,i+40).join("|"),null,15000);
+        sights.forEach(s=>{const e=s.tags.wikidata&&j.entities&&j.entities[s.tags.wikidata];if(!e||!e.sitelinks)return;
+          const nl=e.sitelinks.nlwiki;
+          if(nl){ if(s._wl!=="nl"){s._wl="nl";s._wt=nl.title;(byLang.nl=byLang.nl||[]).push(nl.title);} }
+          else if(!s._wl){const any=["enwiki","itwiki","frwiki","dewiki","eswiki"].map(k=>e.sitelinks[k]).find(Boolean);if(any){s._wl=any.site.replace("wiki","");s._wt=any.title;(byLang[s._wl]=byLang[s._wl]||[]).push(any.title);}}
+        });
+      }catch(e){}
+    }
+  }
+  // 3. geosearch in nl-wikipedia voor de rest
+  const rest=sights.filter(s=>!s._wl).slice(0,14);
+  await Promise.all(rest.map(async s=>{
+    try{
+      const j=await getJSON(`https://nl.wikipedia.org/w/api.php?action=query&list=geosearch&gscoord=${s.lat}|${s.lon}&gsradius=120&gslimit=6&format=json&origin=*`,null,12000);
+      const words=s.name.toLowerCase().split(/[\s\-']+/).filter(w=>w.length>3);
+      const hit=(j.query&&j.query.geosearch||[]).find(g=>words.some(w=>g.title.toLowerCase().includes(w)));
+      if(hit){s._wl="nl";s._wt=hit.title;(byLang.nl=byLang.nl||[]).push(hit.title);}
+    }catch(e){}
+  }));
+  // fetch extracts
+  const res={};
+  await Promise.all(Object.entries(byLang).map(async([l,ts])=>{res[l]=await wikiExtracts(l,[...new Set(ts)],false);}));
+  stops.forEach(s=>{
+    const ex=s._wl&&res[s._wl]&&res[s._wl][s._wt];
+    if(ex&&ex.text&&ex.text.length>40){s.text=trimText(ex.text,1300);s.lang=s._wl;s.src={lang:s._wl,title:ex.title};}
+    else{s.text=tagText(s);s.lang="nl";}
+    delete s._wl;delete s._wt;
+  });
+}
+
+/* ================= result & map ================= */
+function show(id){["planner","loading","result"].forEach(s=>$(s).classList.toggle("hidden",s!==id));window.scrollTo&&window.scrollTo(0,0);if(id==="result"&&map)setTimeout(()=>map.invalidateSize(),50);}
+function showErr(m){const e=$("perr");e.textContent=m;e.classList.remove("hidden");}
+function hideErr(){$("perr").classList.add("hidden");}
+
+function showResult(){
+  show("result");
+  const sights=route.stops.filter(s=>s.kind==="sight").length;
+  const mins=route.km/route.spd*60;
+  $("rstats").innerHTML=`<span class="stat"><b>${route.stops.length}</b> stops</span><span class="stat"><b>${sights}</b> bezienswaardigheden</span><span class="stat">${route.approx?"± ":""}<b>${fmtKm(route.km)}</b></span><span class="stat">± <b>${fmtDur(Math.round(mins/5)*5)}</b></span>`;
+  let note=[];
+  if(route.approx)note.push("De routeplanner was niet bereikbaar: de lijn op de kaart is een benadering.");
+  if(route.km>route.target*1.15)note.push("De vaste punten liggen verder uit elkaar dan de gekozen duur toelaat; er zijn alleen stops op de weg toegevoegd.");
+  if(!sights)note.push(route.poiCount?"Geen bezienswaardigheden gevonden die in de tijd passen. Verleng de duur of kies meer interesses.":"Er zijn in OpenStreetMap geen bezienswaardigheden gevonden in deze buurt, of de dienst was niet bereikbaar.");
+  $("rnote").textContent=note.join(" ");
+  drawMap();renderStops();renderVoiceSel();impStatus();
+}
+function drawMap(){
+  if(!window.L){$("map").innerHTML='<div class="acinfo">De kaart kon niet laden.</div>';return;}
+  if(!map){
+    map=L.map("map",{zoomControl:true});
+    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19,attribution:'© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'}).addTo(map);
+  }
+  if(layers)layers.remove();
+  layers=L.layerGroup().addTo(map);
+  const ll=route.stops.map(s=>[s.lat,s.lon]);
+  const line=route.geom&&route.geom.length?route.geom:ll;
+  L.polyline(line,{color:"#b8492f",weight:5,opacity:.8,dashArray:route.geom?null:"8 8"}).addTo(layers);
+  route.stops.forEach((s,i)=>{
+    const done=route.done&&route.done.includes(i);
+    const ic=L.divIcon({className:"",html:`<div class="mk ${s.kind!=="sight"?"fixed":""} ${done?"done":""}">${i+1}</div>`,iconSize:[28,28],iconAnchor:[14,14]});
+    L.marker([s.lat,s.lon],{icon:ic}).addTo(layers).on("click",()=>openStop(i,true));
+  });
+  map.fitBounds(L.latLngBounds(line),{padding:[24,24]});
+}
+function gUrl(a,b){return `https://www.google.com/maps/dir/?api=1&travelmode=walking&origin=${a.lat},${a.lon}&destination=${b.lat},${b.lon}`;}
+function renderStops(){
+  const box=$("stops");box.innerHTML="";
+  route.stops.forEach((s,i)=>{
+    const d=document.createElement("div");d.className="stop"+(route.done&&route.done.includes(i)?" done":"");d.id="stop"+i;
+    const lbl={start:"Vertrek",end:"Eindpunt",waypoint:"Tussenpunt"}[s.kind]||(s.type?s.type[0].toUpperCase()+s.type.slice(1):"Bezienswaardigheid");
+    let leg="";if(i>0){const k=route.legs&&route.legs[i-1]!=null?route.legs[i-1]:hav(route.stops[i-1],s)*1.3;leg=" · "+fmtKm(k)+" vanaf vorige";}
+    d.innerHTML=`<div class="shead"><div class="num ${s.kind!=="sight"?"fixed":""}">${i+1}</div><div><div class="sname"></div><div class="smeta"></div></div></div><div class="sbody"><div class="stext"></div><div class="src"></div><div class="btns"></div></div>`;
+    d.querySelector(".sname").textContent=s.name;
+    d.querySelector(".smeta").textContent=lbl+leg;
+    d.querySelector(".stext").textContent=s.text;
+    const src=d.querySelector(".src");
+    if(s.src){const a=document.createElement("a");a.href=`https://${s.src.lang}.wikipedia.org/wiki/`+encodeURIComponent(s.src.title.replace(/ /g,"_"));a.target="_blank";a.rel="noopener";a.textContent="Wikipedia"+(s.src.lang!=="nl"?" ("+s.src.lang+")":"");src.append("Bron: ",a);}
+    else if(s.kind==="sight")src.textContent="Bron: OpenStreetMap-gegevens";
+    d.querySelector(".shead").onclick=()=>{d.classList.contains("open")?d.classList.remove("open","active"):openStop(i,false);};
+    const btns=d.querySelector(".btns");
+    const sp=btn("🔊 Voorlezen");sp.onclick=()=>toggleSpeak(sp,s.name+". "+s.text,s.lang);btns.append(sp);
+    if(s.src){const m=btn("📖 Vertel meer");m.onclick=()=>tellMore(i,m,d);btns.append(m);}
+    if(i>0){const a=document.createElement("a");a.className="secondary";a.href=gUrl(route.stops[i-1],s);a.target="_blank";a.rel="noopener";a.textContent="🧭 Google Maps";btns.append(a);}
+    box.append(d);
+  });
+}
+function btn(t){const b=document.createElement("button");b.type="button";b.className="secondary";b.textContent=t;return b;}
+function openStop(i,scroll){
+  document.querySelectorAll(".stop").forEach(e=>e.classList.remove("active"));
+  const d=$("stop"+i);if(!d)return;d.classList.add("open","active");
+  if(scroll)d.scrollIntoView({behavior:"smooth",block:"center"});
+  if(map)map.panTo([route.stops[i].lat,route.stops[i].lon]);
+}
+async function tellMore(i,b,d){
+  const s=route.stops[i];b.disabled=true;b.textContent="📖 Laden…";
+  let ex=s.full?{text:s.full}:null;
+  if(!ex){const r=await wikiExtracts(s.src.lang,[s.src.title],true);ex=r[s.src.title];if(ex&&ex.text){s.full=ex.text;store.set("route",route);}}
+  if(ex&&ex.text){
+    const more=trimText(ex.text,4500);
+    const div=document.createElement("div");div.className="stext";div.style.cssText="margin-top:10px;border-left:3px solid var(--line);padding-left:10px";
+    div.textContent=more.startsWith(s.text.slice(0,80))?more.slice(s.text.replace(/…$/,"").length).trim():more;
+    d.querySelector(".src").before(div);
+    const sp=btn("🔊 Lees dit voor");sp.onclick=()=>toggleSpeak(sp,div.textContent,s.lang);b.replaceWith(sp);
+  }else{b.textContent="📖 Niet meer gevonden";}
+}
+
+/* ================= native (Android-app) ================= */
+const NATIVE=!!(window.Capacitor&&window.Capacitor.isNativePlatform&&window.Capacitor.isNativePlatform());
+const BG=NATIVE&&window.Capacitor.registerPlugin?window.Capacitor.registerPlugin("BackgroundGeolocation"):null;
+const NTTS=NATIVE&&window.Capacitor.registerPlugin?window.Capacitor.registerPlugin("TextToSpeech"):null;
+let bgId=null;
+
+/* ================= GPS walk mode + navigatie ================= */
+const DIRS={left:"linksaf",right:"rechtsaf","slight left":"links aanhouden","slight right":"rechts aanhouden","sharp left":"scherp linksaf","sharp right":"scherp rechtsaf",uturn:"omkeren",straight:"rechtdoor"};
+let nav={idx:0,said:{},off:0,lastReroute:0};
+function announceable(st){
+  if(st.type==="depart"||st.type==="arrive")return false;
+  if(st.type==="roundabout"||st.type==="rotary"||st.type==="roundabout turn")return true;
+  if(st.type==="turn"||st.type==="end of road"||st.type==="fork")return st.mod&&st.mod!=="straight";
+  return /left|right|uturn/.test(st.mod)&&!/slight/.test(st.mod); // continue / new name met echte bocht
+}
+function instr(st,dist){
+  const pre=dist>=20?"Over "+Math.round(dist/10)*10+" meter ":"";
+  let s;
+  if(/roundabout|rotary/.test(st.type))s=pre+"de rotonde op, neem afslag "+(st.exit||1);
+  else{const d=DIRS[st.mod]||"verder";s=pre+d;}
+  if(st.name)s+=", "+(/^(via|corso|piazza|piazzale|viale|largo|vicolo|rue|avenue|place|calle|plaza)\b/i.test(st.name)?"":"de ")+st.name+" in";
+  s=s.charAt(0).toUpperCase()+s.slice(1)+".";
+  return s;
+}
+function segDist(p,a,b){const kx=Math.cos(p.lat*Math.PI/180)*111320,ky=110540;
+  const ax=(a[1]-p.lon)*kx,ay=(a[0]-p.lat)*ky,bx=(b[1]-p.lon)*kx,by=(b[0]-p.lat)*ky;
+  const dx=bx-ax,dy=by-ay,l=dx*dx+dy*dy;let t=l?-(ax*dx+ay*dy)/l:0;t=Math.max(0,Math.min(1,t));
+  return Math.hypot(ax+t*dx,ay+t*dy);}
+function distToRoute(p){const g=route.geom;if(!g||g.length<2)return 0;let m=1e9;for(let i=1;i<g.length;i++){const d=segDist(p,g[i-1],g[i]);if(d<m)m=d;}return m;}
+function navUpdate(me,acc){
+  const st=route.steps||[];
+  // stappen die voorbij zijn overslaan
+  while(nav.idx<st.length){
+    const s=st[nav.idx],d=hav(me,s)*1000;
+    const nx=st[nav.idx+1];
+    if(d<18||(!announceable(s))||(nx&&hav(me,nx)*1000<hav(s,nx)*1000-15&&d>25)){nav.idx++;continue;}
+    break;
+  }
+  const s=st[nav.idx];
+  if(s&&!nav.said[nav.idx]){
+    const d=hav(me,s)*1000;
+    if(d<=55){nav.said[nav.idx]=1;
+      let t=instr(s,d);
+      const n2=st[nav.idx+1];if(n2&&announceable(n2)&&hav(s,n2)*1000<30){nav.said[nav.idx+1]=1;t+=" En meteen daarna "+(DIRS[n2.mod]||"verder")+".";}
+      sayNav(t);}
+  }
+  // afwijking van de route
+  if(acc<35){const off=distToRoute(me);
+    if(off>45){nav.off++;}else nav.off=0;
+    if(nav.off>=2&&Date.now()-nav.lastReroute>60000){nav.lastReroute=Date.now();nav.off=0;reroute(me);}
+  }
+}
+async function reroute(me){
+  const rest=route.stops.filter((s,i)=>!route.done.includes(i));
+  if(!rest.length)return;
+  sayNav("Jullie wijken af van de route. Ik zoek een nieuwe weg.");
+  try{
+    const rt=await osrm([me,...rest]);
+    route.geom=rt.geom;route.steps=rt.steps;nav={idx:0,said:{},off:0,lastReroute:Date.now()};
+    store.set("route",route);drawMarkersOnly();
+  }catch(e){sayNav("Geen nieuwe route gevonden. Volg de kaart.");}
+}
+async function startWalk(){
+  if(watchId!=null||bgId!=null){stopWalk();return;}
+  speakPrime();
+  route.done=route.done||[];nav={idx:0,said:{},off:0,lastReroute:0};
+  $("startwalk").textContent="⏹ Stop wandeling";
+  alertBar("Locatie zoeken…");
+  if(BG){
+    try{
+      bgId=await BG.addWatcher({backgroundMessage:"Aanwijzingen en uitleg staan aan. Tik om de app te openen.",backgroundTitle:"Stadswandeling bezig",requestPermissions:true,stale:false,distanceFilter:5},
+        (loc,err)=>{
+          if(err){alertBar(err.code==="NOT_AUTHORIZED"?"Geen toestemming voor je locatie. Geef ze in de instellingen van de app (Locatie: altijd toestaan of tijdens gebruik).":"GPS-fout: "+(err.message||err));if(err.code==="NOT_AUTHORIZED"){try{BG.openSettings();}catch(e){}}return;}
+          if(loc)onPos({coords:{latitude:loc.latitude,longitude:loc.longitude,accuracy:loc.accuracy||20}});
+        });
+      const first=route.stops.find((s,i)=>!route.done.includes(i));
+      sayNav("De wandeling start."+(first?" Eerste stop: "+first.name+".":""));
+    }catch(e){alertBar("GPS starten lukte niet: "+(e.message||e));}
+    return;
+  }
+  if(!navigator.geolocation){alertBar("Je toestel geeft geen locatie door.");return;}
+  const saver=$("saver").checked;
+  if(!saver){try{if(navigator.wakeLock)wakeLock=await navigator.wakeLock.request("screen");}catch(e){}}
+  watchId=navigator.geolocation.watchPosition(onPos,()=>{$("walkbar").textContent="Geen GPS-signaal. Geef de app toestemming voor je locatie.";},{enableHighAccuracy:true,maximumAge:saver?10000:3000,timeout:20000});
+}
+function stopWalk(){
+  if(watchId!=null){navigator.geolocation.clearWatch(watchId);watchId=null;}
+  if(bgId!=null&&BG){BG.removeWatcher({id:bgId}).catch(()=>{});bgId=null;}
+  try{wakeLock&&wakeLock.release();}catch(e){} wakeLock=null;
+  if($("startwalk"))$("startwalk").textContent="▶ Start wandeling (GPS)";
+  $("walkbar").classList.add("hidden");
+}
+function walking(){return watchId!=null||bgId!=null;}
+function alertBar(t){$("walkbar").classList.remove("hidden");$("walkbar").textContent=t;}
+function onPos(p){
+  const me={lat:p.coords.latitude,lon:p.coords.longitude},acc=p.coords.accuracy||20;lastPos=me;
+  if(!document.hidden&&map&&window.L){if(!meMarker)meMarker=L.marker([me.lat,me.lon],{icon:L.divIcon({className:"",html:'<div class="me"></div>',iconSize:[16,16],iconAnchor:[8,8]}),zIndexOffset:1000}).addTo(map);else meMarker.setLatLng([me.lat,me.lon]);}
+  // aankomst bij een stop
+  route.stops.forEach((s,i)=>{
+    if(route.done.includes(i))return;
+    if(hav(me,s)*1000<=Math.max(ARRIVE_M,acc*0.8)){
+      route.done.push(i);store.set("route",route);
+      const d=$("stop"+i);if(d)d.classList.add("done");
+      if(!document.hidden)openStop(i,true);
+      const nxt=route.stops.find((x,j)=>!route.done.includes(j));
+      const tail=nxt?" … Volgende stop: "+nxt.name+", op ongeveer "+spokenKm((route.legs&&route.legs[route.stops.indexOf(nxt)-1])||hav(s,nxt)*1.3)+".":" … Dit was de laatste stop. Bedankt om mee te wandelen!";
+      if($("autoplay").checked&&!story){const b=d&&d.querySelector(".btns button");if(b)toggleSpeak(b,s.name+". "+s.text+tail,s.lang);}
+      else sayNav("Jullie zijn bij "+s.name+"."+(nxt?" Volgende stop: "+nxt.name+".":""));
+      if(!document.hidden)drawMarkersOnly();
+    }
+  });
+  navUpdate(me,acc);
+  const next=route.stops.findIndex((s,i)=>!route.done.includes(i));
+  if(next<0){$("walkbar").innerHTML="🎉 <b>Wandeling voltooid!</b>";return;}
+  const s=route.stops[next];
+  if(route._pf!==next){route._pf=next;if(!$("saver").checked||NATIVE)prefetchStop(next);}
+  if(!document.hidden){
+    const st=(route.steps||[])[nav.idx];
+    const turn=st&&announceable(st)?" · "+instr(st,hav(me,st)*1000).replace(/\.$/,""):"";
+    $("walkbar").innerHTML=`Volgende stop: <b>${next+1}. </b><b></b> · ${fmtKm(hav(me,s))}<span></span>`;
+    $("walkbar").querySelectorAll("b")[1].textContent=s.name;$("walkbar").querySelector("span").textContent=turn;
+  }
+}
+function drawMarkersOnly(){const c=map&&map.getCenter(),z=map&&map.getZoom();drawMap();if(c)map.setView(c,z);}
+
+/* ================= speech ================= */
+
+const AI_VOICES=[{id:"nl_BE-nathalie-medium",label:"Nathalie (Vlaams, vrouw)"},{id:"nl_BE-rdh-medium",label:"Rdh (Vlaams, man)"},{id:"nl_NL-mls-medium",label:"Nederlands (NL)"}];
+let piper=null;
+function installHFCache(){ // modellen bewaren in de browsercache, zodat ze maar één keer gedownload worden
+  if(window.__hfc||!window.caches)return; window.__hfc=1; const of=window.fetch.bind(window);
+  window.fetch=async(input,init)=>{
+    const url=typeof input==="string"?input:(input&&input.url)||"";
+    if(/huggingface\.co\/diffusionstudio\/piper-voices\//.test(url)&&(!init||!init.method||init.method==="GET")){
+      try{const c=await caches.open("piper-voices");const hit=await c.match(url);if(hit)return hit;
+        const r=await of(input,init);if(r.ok){c.put(url,r.clone()).catch(()=>{});}return r;}catch(e){return of(input,init);}
+    }
+    return of(input,init);
+  };
+}
+async function loadPiper(){if(!piper){installHFCache();piper=await import("./piper-tts.js");}return piper;}
+async function aiStored(id){
+  try{const P=await loadPiper();const url=P.HF_BASE+"/"+P.PATH_MAP[id];
+    if(window.caches){const c=await caches.open("piper-voices");if(await c.match(url))return true;}
+    return (await P.stored()).includes(id);}catch(e){return false;}
+}
+const aiAudio=new Audio();let aiRun=0;const aiCache=new Map();
+function aiUnlock(){try{aiAudio.src="data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQAAAAA=";const p=aiAudio.play();p&&p.catch(()=>{});}catch(e){}}
+function hashStr(s){let h=2166136261;for(let i=0;i<s.length;i++){h^=s.charCodeAt(i);h=Math.imul(h,16777619);}return (h>>>0).toString(36)+s.length.toString(36);}
+function audioKey(id,t){return location.origin+"/__audio/"+id+"/"+hashStr(t)+".wav";}
+async function audioCached(id,t){try{if(!window.caches)return null;const c=await caches.open("route-audio");const r=await c.match(audioKey(id,t));return r?await r.blob():null;}catch(e){return null;}}
+function aiSynth(id,t){const k=id+"|"+t;if(!aiCache.has(k)){
+  const pr=(async()=>{let b=await audioCached(id,t);
+    if(!b){const P=await loadPiper();b=await P.predict({text:t,voiceId:id});
+      try{if(window.caches){const c=await caches.open("route-audio");await c.put(audioKey(id,t),new Response(b,{headers:{"Content-Type":"audio/wav"}}));}}catch(e){}}
+    return URL.createObjectURL(b);})();
+  pr.catch(()=>aiCache.delete(k));aiCache.set(k,pr);}return aiCache.get(k);}
+function voicesFor(lang){try{return (window.speechSynthesis?speechSynthesis.getVoices():[]).filter(v=>v.lang.toLowerCase().startsWith(lang));}catch(e){return [];}}
+function nlVoices(){return voicesFor("nl").sort((x,y)=>(/be/i.test(y.lang)-/be/i.test(x.lang))||(y.localService-x.localService));}
+function renderVoiceSel(){
+  const sel=$("voice");const saved=store.get("voice");sel.innerHTML="";
+  const g1=document.createElement("optgroup");g1.label="AI-stem (gratis, eenmalig ± 60 MB)";
+  AI_VOICES.forEach(v=>{const o=document.createElement("option");o.value="ai:"+v.id;o.textContent=v.label;g1.append(o);});
+  const g2=document.createElement("optgroup");g2.label="Stemmen van je toestel";
+  if(NTTS){[["android:nl-BE","Google-stem Vlaams (nl-BE)"],["android:nl-NL","Google-stem Nederlands (nl-NL)"]].forEach(([k,l])=>{const o=document.createElement("option");o.value=k;o.textContent=l;g2.append(o);});}
+  else nlVoices().forEach(v=>{const o=document.createElement("option");o.value=v.voiceURI;o.textContent=v.name+" ("+v.lang+")";g2.append(o);});
+  if(!g2.children.length){const o=document.createElement("option");o.value="";o.textContent="Standaardstem van je toestel";g2.append(o);}
+  sel.append(g2,g1);
+  if(saved&&[...sel.options].some(o=>o.value===saved))sel.value=saved;
+  $("vhint").textContent="De AI-stemmen klinken het natuurlijkst. Ze draaien op je toestel zelf; na de download werken ze zonder extra kosten.";
+  const r=store.get("vrate");if(r)$("vrate").value=r;$("vratev").textContent="× "+(+$("vrate").value).toFixed(2).replace(".",",");
+  updateAiStatus();
+}
+async function updateAiStatus(){
+  const v=$("voice").value,box=$("aistat");
+  if(!v.startsWith("ai:")){box.classList.add("hidden");return;}
+  box.classList.remove("hidden");$("aitxt").textContent="Controleren…";$("aidl").classList.add("hidden");
+  const ok=await aiStored(v.slice(3));
+  if($("voice").value!==v)return;
+  if(ok){$("aitxt").textContent="✓ Deze stem staat op je toestel. Tik op ▶ Test om te luisteren. De eerste keer voorlezen duurt een paar seconden.";}
+  else{$("aitxt").textContent="Deze stem moet eenmalig gedownload worden (± 60 MB). Doe dat best via wifi, bv. nu in het hotel.";$("aidl").classList.remove("hidden");$("aidl").disabled=false;$("aidl").textContent="⬇ Stem downloaden";}
+}
+$("aidl").onclick=async()=>{
+  const v=$("voice").value;if(!v.startsWith("ai:"))return;
+  const b=$("aidl");b.disabled=true;b.textContent="⬇ Starten…";
+  try{
+    const P=await loadPiper();
+    await P.download(v.slice(3),pr=>{if(pr.url.endsWith(".onnx")&&pr.total)b.textContent="⬇ "+Math.round(pr.loaded*100/pr.total)+"%  ("+Math.round(pr.loaded/1048576)+" MB)";});
+    await sleep(500);updateAiStatus();
+  }catch(e){b.disabled=false;b.textContent="⬇ Opnieuw proberen";$("aitxt").textContent="Download mislukt: "+(e.message||e);}
+};
+/* ---- centrale speler: navigatie-aanwijzingen gaan voor, verhalen worden zo nodig even onderbroken ---- */
+let story=null,spTok=0,speaking=false;const navQ=[];
+function resetBtn(b){if(b){b.classList.remove("speaking");if(b.dataset.lbl)b.textContent=b.dataset.lbl;}}
+function cancelAudio(){try{aiAudio._stop=true;aiAudio.pause();}catch(e){}try{window.speechSynthesis&&speechSynthesis.cancel();}catch(e){}try{NTTS&&NTTS.stop();}catch(e){}}
+function stopSpeaking(){navQ.length=0;if(story){resetBtn(story.btn);story=null;}spTok++;speaking=false;cancelAudio();}
+function stopStory(){if(story){resetBtn(story.btn);story=null;}spTok++;speaking=false;cancelAudio();pump();}
+function speakPrime(){try{const u=new SpeechSynthesisUtterance(" ");u.volume=0;speechSynthesis.speak(u);}catch(e){}aiUnlock();}
+function chunk(t,max){const out=[];let cur="";(t.match(/[^.!?…]+[.!?…]*\s*/g)||[t]).forEach(s=>{if((cur+s).length>max&&cur){out.push(cur.trim());cur="";}cur+=s;});if(cur.trim())out.push(cur.trim());return out;}
+function voiceChoice(){return ($("voice")&&$("voice").value)||"";}
+async function utterDevice(text,lang){
+  const rate=+$("vrate").value||1,choice=voiceChoice();
+  if(NTTS){const l=lang==="nl"?(choice==="android:nl-NL"?"nl-NL":"nl-BE"):lang;await NTTS.speak({text,lang:l,rate,pitch:1,volume:1,queueStrategy:0});return;}
+  const ss=window.speechSynthesis;if(!ss)throw new Error("geen spraak");
+  let v=null;if(lang==="nl"){v=nlVoices().find(x=>x.voiceURI===choice)||nlVoices()[0]||null;}else v=voicesFor(lang)[0]||null;
+  await new Promise(res=>{const u=new SpeechSynthesisUtterance(text);u.lang=v?v.lang:(lang==="nl"?"nl-BE":lang);if(v)u.voice=v;u.rate=rate;u.onend=res;u.onerror=res;ss.speak(u);});
+}
+async function utterAI(text,startAt){
+  const url=await aiSynth(voiceChoice().slice(3),text);
+  aiAudio._stop=false;aiAudio.src=url;aiAudio.playbackRate=+$("vrate").value||1;
+  if(startAt){try{aiAudio.currentTime=startAt;}catch(e){}}
+  await aiAudio.play();
+  await new Promise(res=>{aiAudio.onended=res;aiAudio.onerror=res;aiAudio.onpause=()=>{if(aiAudio._stop||aiAudio.ended)res();};});
+}
+async function pump(){
+  if(speaking)return;speaking=true;const tok=spTok;
+  try{
+    while(tok===spTok){
+      if(navQ.length){const t=navQ.shift();try{await utterDevice(t,"nl");}catch(e){}continue;}
+      if(story&&story.i<story.chunks.length){
+        const s=story,c=s.chunks[s.i];
+        const useAI=s.ai&&!(NATIVE&&document.hidden);
+        try{ if(useAI){const at=s.resumeAt||0;s.resumeAt=0;await utterAI(c,at);} else await utterDevice(c,s.lang); }
+        catch(e){ if(useAI&&story===s){s.ai=false;$("vhint").textContent="AI-stem lukte niet ("+(e&&e.message||e)+"). De stem van je toestel wordt gebruikt.";continue;} }
+        if(tok!==spTok)break;
+        if(s.interrupted){s.interrupted=false;continue;}
+        if(story===s)s.i++;
+        continue;
+      }
+      if(story){resetBtn(story.btn);story=null;}
+      break;
+    }
+  }finally{if(tok===spTok)speaking=false;}
+}
+function sayNav(t){
+  navQ.push(t);
+  if(story&&story.ai&&!aiAudio.paused&&!aiAudio.ended){story.resumeAt=Math.max(0,aiAudio.currentTime-1);story.interrupted=true;aiAudio._stop=true;aiAudio.pause();}
+  pump();
+}
+function toggleSpeak(b,text,lang){
+  if(story&&story.btn===b){stopStory();return;}
+  if(story)stopStory();
+  lang=lang||"nl";const ai=voiceChoice().startsWith("ai:")&&lang==="nl";
+  if(ai)aiUnlock();
+  b.dataset.lbl=b.dataset.lbl||b.textContent;b.classList.add("speaking");b.textContent="⏹ Stop";
+  story={btn:b,chunks:chunk(text,ai?400:NTTS?1500:220),i:0,lang,ai};
+  pump();
+}
+function prefetchStop(i){const v=voiceChoice();const s=route&&route.stops[i];if(!s||!v.startsWith("ai:")||s.lang!=="nl")return;aiSynth(v.slice(3),chunk(s.name+". "+s.text,400)[0]).catch(()=>{});}
+try{if(window.speechSynthesis){speechSynthesis.getVoices();speechSynthesis.addEventListener&&speechSynthesis.addEventListener("voiceschanged",()=>{if(route)renderVoiceSel();});}}catch(e){}
+
+/* ================= GPX export ================= */
+function xmlEsc(s){return String(s).replace(/[<>&"']/g,c=>({"<":"&lt;",">":"&gt;","&":"&amp;",'"':"&quot;","'":"&apos;"}[c]));}
+function exportGPX(){
+  if(!route)return;
+  const name=(route.stops[0].name+" → "+route.stops[route.stops.length-1].name);
+  const wpts=route.stops.map((s,i)=>`  <wpt lat="${s.lat.toFixed(6)}" lon="${s.lon.toFixed(6)}"><name>${xmlEsc((i+1)+". "+s.name)}</name><desc>${xmlEsc(s.text.slice(0,600))}</desc></wpt>`).join("\n");
+  const line=(route.geom&&route.geom.length?route.geom:route.stops.map(s=>[s.lat,s.lon]));
+  const trk=line.map(p=>`      <trkpt lat="${(+p[0]).toFixed(6)}" lon="${(+p[1]).toFixed(6)}"/>`).join("\n");
+  const gpx=`<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="Stadswandeling" xmlns="http://www.topografix.com/GPX/1/1">
+  <metadata><name>${xmlEsc(name)}</name></metadata>
+${wpts}
+  <trk><name>${xmlEsc(name)}</name><trkseg>
+${trk}
+  </trkseg></trk>
+</gpx>`;
+  const blob=new Blob([gpx],{type:"application/gpx+xml"});
+  const a=document.createElement("a");a.href=URL.createObjectURL(blob);
+  a.download="stadswandeling-"+new Date().toISOString().slice(0,10)+".gpx";
+  document.body.append(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},2000);
+}
+
+/* ================= import & spaarstand ================= */
+let impRun=0;
+function impStatus(){
+  const st=$("impstat");if(!route){st.textContent="";return;}
+  const v=$("voice").value||"";
+  if(route.imported&&route.imported.voice===v){st.innerHTML="✓ <b>Geïmporteerd</b> ("+new Date(route.imported.at).toLocaleString("nl-BE",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"})+"). Alles staat op je toestel.";$("impbtn").textContent="📥 Opnieuw importeren";}
+  else if(route.imported){st.textContent="Geïmporteerd met een andere stem. Importeer opnieuw voor de huidige stem.";$("impbtn").textContent="📥 Route importeren";}
+  else{st.textContent=v.startsWith("ai:")?"Nog niet geïmporteerd. Duurt enkele minuten, afhankelijk van je toestel.":"Nog niet geïmporteerd. Met een toestelstem gaat dit snel: alleen de teksten worden opgehaald.";$("impbtn").textContent="📥 Route importeren";}
+}
+async function importRoute(){
+  if(!route)return;
+  const my=++impRun,v=$("voice").value||"",ai=v.startsWith("ai:"),id=ai?v.slice(3):null;
+  $("impbtn").disabled=true;$("impstop").classList.remove("hidden");$("impprog").classList.remove("hidden");
+  const bar=$("impprog").firstChild,st=$("impstat");
+  let lock=null;try{if(navigator.wakeLock)lock=await navigator.wakeLock.request("screen");}catch(e){}
+  const t0=Date.now();
+  try{
+    // 1. volledige teksten
+    st.textContent="Teksten ophalen…";
+    const byLang={};route.stops.forEach(s=>{if(s.src&&!s.full)(byLang[s.src.lang]=byLang[s.src.lang]||[]).push(s.src.title);});
+    for(const [l,ts] of Object.entries(byLang)){const r=await wikiExtracts(l,ts,true);route.stops.forEach(s=>{if(s.src&&s.src.lang===l&&r[s.src.title])s.full=r[s.src.title].text;});}
+    store.set("route",route);bar.style.width="10%";
+    // 2. stem
+    if(ai){
+      if(!(await aiStored(id))){st.textContent="Stem downloaden (± 60 MB)…";const P=await loadPiper();await P.download(id,pr=>{if(pr.url.endsWith(".onnx")&&pr.total){bar.style.width=(10+15*pr.loaded/pr.total)+"%";}});}
+      const jobs=[];route.stops.forEach((s,i)=>{if(s.lang==="nl")chunk(s.name+". "+s.text,400).forEach(t=>jobs.push({i,t}));});
+      for(let k=0;k<jobs.length;k++){
+        if(my!==impRun)throw new Error("gestopt");
+        const el=(Date.now()-t0)/1000,left=k?Math.round(el/k*(jobs.length-k)):null;
+        st.textContent="Stem maken: stop "+(jobs[k].i+1)+" van "+route.stops.length+" ("+(k+1)+"/"+jobs.length+")"+(left!=null?" · nog ± "+(left>90?Math.round(left/60)+" min":left+" s"):"");
+        await sleep(30);
+        await aiSynth(id,jobs[k].t);
+        bar.style.width=(25+75*(k+1)/jobs.length)+"%";
+      }
+    }else bar.style.width="100%";
+    route.imported={voice:v,at:Date.now()};store.set("route",route);
+    try{navigator.storage&&navigator.storage.persist&&navigator.storage.persist();}catch(e){}
+  }catch(e){st.textContent=(e.message==="gestopt"?"Gestopt. ":"Importeren mislukt: "+(e.message||e)+". ")+"Wat al klaar is, blijft bewaard; tik opnieuw om verder te gaan.";}
+  finally{try{lock&&lock.release();}catch(e){}$("impbtn").disabled=false;$("impstop").classList.add("hidden");$("impprog").classList.add("hidden");if(route.imported&&route.imported.voice===v)impStatus();}
+}
+function applySaver(){
+  const on=$("saver").checked;store.set("saver",on);
+  document.body.classList.toggle("dark",on);
+  if(NATIVE){$("saverhint").textContent="In de app werken aanwijzingen en voorlezen ook met het scherm uit en de gsm op zak. Je ziet een melding zolang de wandeling loopt.";return;}
+  $("saverhint").textContent=on?"Je scherm mag uit tijdens de wandeling. Maak het wakker als je bij een stop bent: de app kijkt dan meteen waar je bent en leest voor. Een AI-stem die al voorleest, speelt ook verder met het scherm uit.":"Het scherm blijft aan tijdens de wandeling. Dat is handiger, maar kost veel meer batterij.";
+  if(watchId!=null&&!NATIVE){ if(on){try{wakeLock&&wakeLock.release();}catch(e){}wakeLock=null;} else if(navigator.wakeLock){navigator.wakeLock.request("screen").then(l=>wakeLock=l).catch(()=>{});} }
+}
+document.addEventListener("visibilitychange",()=>{
+  if(document.visibilityState==="visible"&&watchId!=null&&!NATIVE){
+    navigator.geolocation.getCurrentPosition(onPos,()=>{},{enableHighAccuracy:true,maximumAge:0,timeout:15000});
+    if(!$("saver").checked&&navigator.wakeLock&&!wakeLock)navigator.wakeLock.request("screen").then(l=>wakeLock=l).catch(()=>{});
+  }
+});
+
+/* ================= events ================= */
+$("go").onclick=()=>plan(false);
+$("cancel").onclick=()=>{if(planAbort){planAbort.userCancel=true;planAbort.abort();}};
+$("regen").onclick=()=>plan(true);
+$("back").onclick=()=>{stopSpeaking();stopWalk();show("planner");};
+$("startwalk").onclick=startWalk;
+$("voice").onchange=()=>{store.set("voice",$("voice").value);stopSpeaking();updateAiStatus();impStatus();};
+$("impbtn").onclick=importRoute;
+$("gpx").onclick=exportGPX;
+$("impstop").onclick=()=>{impRun++;};
+$("saver").onchange=applySaver;
+{const sv=store.get("saver");if(sv===false)$("saver").checked=false;applySaver();}
+$("vrate").oninput=()=>{store.set("vrate",$("vrate").value);$("vratev").textContent="× "+(+$("vrate").value).toFixed(2).replace(".",",");};
+$("vtest").onclick=()=>toggleSpeak($("vtest"),"Hallo! Dit is de stem die jullie tijdens de wandeling begeleidt.","nl");
+load();
+})();
+</script>
+</body>
+</html>
