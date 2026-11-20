@@ -146,6 +146,7 @@ body.dark .leaflet-tile-pane{filter:brightness(.55) contrast(1.15)}
       <div class="btns">
         <button class="primary" id="startwalk" type="button" style="width:auto;padding:11px 18px;font-size:15px">▶ Start wandeling (GPS)</button>
         <button class="secondary" id="regen" type="button">↻ Andere route</button>
+        <button class="secondary" id="simbtn" type="button">🧪 Simuleer wandeling</button>
         <button class="secondary" id="gpx" type="button">🗺️ Exporteren voor OsmAnd (GPX)</button>
       </div>
       <label class="switch"><input type="checkbox" id="autoplay" checked> Automatisch voorlezen bij aankomst</label>
@@ -441,7 +442,7 @@ async function plan(alt){
   if(!state.start.sel||!state.end.sel){showErr("Kies een vertrek- en eindpunt uit de suggestielijst.");return;}
   const missing=pts.findIndex(p=>!p.sel);
   if(missing>=0){showErr("Tussenpunt '"+pts[missing].text+"' is niet gekozen uit de lijst. Kies een suggestie of verwijder het.");return;}
-  save();stopSpeaking();stopWalk();$("steps").innerHTML="";curStep=null;$("fatal").classList.add("hidden");show("loading");
+  save();stopSpeaking();stopWalk();stopSim();$("steps").innerHTML="";curStep=null;$("fatal").classList.add("hidden");show("loading");
   planAbort=new AbortController();const pa=planAbort;
   const overall=setTimeout(()=>pa.abort(),120000);
   const mins=+$("dur").value,spd=+$("spd").value,target=mins/60*spd;
@@ -750,7 +751,34 @@ function stopWalk(){
   if($("startwalk"))$("startwalk").textContent="▶ Start wandeling (GPS)";
   $("walkbar").classList.add("hidden");
 }
-function walking(){return watchId!=null||bgId!=null;}
+function walking(){return watchId!=null||bgId!=null||!!sim;}
+/* ---- simulatie: de route virtueel afwandelen om thuis te testen ---- */
+let sim=null;const SIM_X=4;
+function startSim(){
+  if(sim){stopSim();return;}
+  if(watchId!=null||bgId!=null)stopWalk();
+  const g=(route.geom&&route.geom.length>1)?route.geom:route.stops.map(s=>[s.lat,s.lon]);
+  const cum=[0];for(let i=1;i<g.length;i++)cum.push(cum[i-1]+hav({lat:g[i-1][0],lon:g[i-1][1]},{lat:g[i][0],lon:g[i][1]})*1000);
+  route.done=[];nav={idx:0,said:{},off:0,lastReroute:Date.now()};store.set("route",route);
+  document.querySelectorAll(".stop.done").forEach(e=>e.classList.remove("done"));
+  speakPrime();
+  const speed=(+$("spd").value||2.8)/3.6*SIM_X;const t0=Date.now();
+  sim={t:setInterval(()=>{
+    const d=(Date.now()-t0)/1000*speed;
+    if(d>=cum[cum.length-1]){const e=g[g.length-1];onPos({coords:{latitude:e[0],longitude:e[1],accuracy:8}});stopSim(true);return;}
+    let i=1;while(i<cum.length&&cum[i]<d)i++;
+    const f=(d-cum[i-1])/((cum[i]-cum[i-1])||1),a=g[i-1],b=g[i];
+    onPos({coords:{latitude:a[0]+(b[0]-a[0])*f,longitude:a[1]+(b[1]-a[1])*f,accuracy:8}});
+  },1000)};
+  $("simbtn").textContent="⏹ Stop simulatie";
+  alertBar("Simulatie: de route wordt "+SIM_X+"× sneller afgewandeld.");
+  sayNav("Simulatie gestart.");
+}
+function stopSim(finished){
+  if(!sim)return;clearInterval(sim.t);sim=null;
+  $("simbtn").textContent="🧪 Simuleer wandeling";
+  if(!finished)$("walkbar").classList.add("hidden");
+}
 function alertBar(t){$("walkbar").classList.remove("hidden");$("walkbar").textContent=t;}
 function onPos(p){
   const me={lat:p.coords.latitude,lon:p.coords.longitude},acc=p.coords.accuracy||20;lastPos=me;
@@ -1027,11 +1055,12 @@ $("go").onclick=()=>plan(false);
 {const q=store.get("quiet");if(q===false)$("quiet").checked=false;$("quiet").onchange=()=>store.set("quiet",$("quiet").checked);}
 $("cancel").onclick=()=>{if(planAbort){planAbort.userCancel=true;planAbort.abort();}};
 $("regen").onclick=()=>plan(true);
-$("back").onclick=()=>{stopSpeaking();stopWalk();show("planner");};
+$("back").onclick=()=>{stopSpeaking();stopWalk();stopSim();show("planner");};
 $("startwalk").onclick=startWalk;
 $("voice").onchange=()=>{store.set("voice",$("voice").value);stopSpeaking();updateAiStatus();impStatus();};
 $("impbtn").onclick=importRoute;
 $("gpx").onclick=exportGPX;
+$("simbtn").onclick=startSim;
 $("impstop").onclick=()=>{impRun++;};
 $("saver").onchange=applySaver;
 {const sv=store.get("saver");if(sv===false)$("saver").checked=false;applySaver();}
