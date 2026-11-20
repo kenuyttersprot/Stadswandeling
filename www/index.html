@@ -196,7 +196,8 @@ function step(t){ // sluit vorige stap af en start nieuwe
   if(curStep){curStep.textContent="✓ "+curStep.dataset.t+" ("+((now-stepT0)/1000).toFixed(1)+" s)";}
   stepT0=now;const li=document.createElement("li");li.dataset.t=t;li.textContent="… "+t;$("steps").append(li);curStep=li;$("lmsg").textContent=t;
 }
-function stepFail(why){if(curStep){curStep.textContent="✗ "+curStep.dataset.t+": "+why;curStep.style.color="#7d2a17";curStep=null;}}
+let planErrs=[];
+function stepFail(why){planErrs.push((curStep?curStep.dataset.t+": ":"")+why);if(curStep){curStep.textContent="✗ "+curStep.dataset.t+": "+why;curStep.style.color="#7d2a17";curStep=null;}}
 function stepNote(t){if(curStep)curStep.textContent="… "+curStep.dataset.t+" ("+t+")";}
 function fatal(m){const f=$("fatal");f.textContent="Er ging iets mis: "+m;f.classList.remove("hidden");}
 window.addEventListener("error",e=>fatal((e.message||"onbekende fout")+(e.lineno?" (regel "+e.lineno+")":"")));
@@ -205,7 +206,25 @@ function hav(a,b){const R=6371,r=x=>x*Math.PI/180,dLa=r(b.lat-a.lat),dLo=r(b.lon
 function spokenKm(k){return k<1?(Math.round(k*20)*50)+" meter":(Math.round(k*10)/10).toString().replace(".00","").replace("."," komma ")+" kilometer";}
 function fmtKm(k){return k<1?Math.round(k*1000)+" m":k.toFixed(1).replace(".",",")+" km";}
 function fmtDur(m){const h=Math.floor(m/60),r=Math.round(m%60);return h?h+" u"+(r?" "+r:""):r+" min";}
-async function getJSON(url,opt,ms){const c=new AbortController();const t=setTimeout(()=>c.abort(),ms||20000);if(planAbort)planAbort.signal.addEventListener("abort",()=>c.abort());try{const r=await fetch(url,Object.assign({signal:c.signal},opt||{}));if(!r.ok)throw new Error("HTTP "+r.status);return await r.json();}finally{clearTimeout(t);}}
+const APP_UA="Stadswandeling-app/1.0 (github.com/kenuyttersprot/Stadswandeling)";
+function capHttp(){try{return window.Capacitor&&window.Capacitor.isNativePlatform&&window.Capacitor.isNativePlatform()&&window.Capacitor.Plugins&&window.Capacitor.Plugins.CapacitorHttp||null;}catch(e){return null;}}
+async function nativeJSON(H,url,opt,ms){
+  const method=(opt&&opt.method)||"GET";
+  const headers=Object.assign({"User-Agent":APP_UA,"Accept":"application/json"},(opt&&opt.headers)||{});
+  const req={url,method,headers,connectTimeout:ms,readTimeout:ms,responseType:"json"};
+  if(opt&&opt.form){headers["Content-Type"]="application/x-www-form-urlencoded";req.data=opt.form;}
+  const p=H.request(req);
+  const r=await Promise.race([p,new Promise((_,rej)=>{setTimeout(()=>rej(new Error("geen antwoord binnen "+Math.round(ms/1000)+" s")),ms);if(planAbort)planAbort.signal.addEventListener("abort",()=>rej(Object.assign(new Error("afgebroken"),{name:"AbortError"})));})]);
+  if(r.status>=400)throw new Error("HTTP "+r.status+(r.data&&r.data.error?": "+r.data.error:""));
+  return typeof r.data==="string"?JSON.parse(r.data):r.data;
+}
+async function getJSON(url,opt,ms){
+  ms=ms||20000;
+  const H=capHttp(); if(H) return nativeJSON(H,url,opt,ms);
+  if(opt&&opt.form){opt=Object.assign({},opt,{headers:Object.assign({"Content-Type":"application/x-www-form-urlencoded"},opt.headers||{}),body:Object.entries(opt.form).map(([k,v])=>k+"="+encodeURIComponent(v)).join("&")});delete opt.form;}
+  return getJSONweb(url,opt,ms);
+}
+async function getJSONweb(url,opt,ms){const c=new AbortController();const t=setTimeout(()=>c.abort(),ms||20000);if(planAbort)planAbort.signal.addEventListener("abort",()=>c.abort());try{const r=await fetch(url,Object.assign({signal:c.signal},opt||{}));if(!r.ok)throw new Error("HTTP "+r.status);return await r.json();}finally{clearTimeout(t);}}
 
 /* ================= state ================= */
 let state={start:{text:"",sel:null},end:{text:"",sel:null},waypoints:[],interests:new Set(["Architectuur","Kerken","Geschiedenis","Pleinen & parken"])};
@@ -358,7 +377,7 @@ ${cafe}
 );out center tags 700;`;
   let lastErr;
   for(const ep of OVERPASS){
-    try{ return await getJSON(ep,{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:"data="+encodeURIComponent(q)},20000); }
+    try{ return await getJSON(ep,{method:"POST",form:{data:q}},20000); }
     catch(e){lastErr=e; if(planAbort&&planAbort.signal.aborted)throw e; stepNote("server "+(OVERPASS.indexOf(ep)+1)+" reageerde niet, volgende proberen");}
   }
   throw lastErr||new Error("Overpass");
@@ -394,8 +413,9 @@ async function valhalla(points){
   return {km:j.trip.summary.length,geom,legs,steps,engine:"valhalla"};
 }
 async function routeWalk(points){
-  if(points.length<=20){try{return await valhalla(points);}catch(e){if(planAbort&&planAbort.signal.aborted)throw e;}}
-  return await osrm(points);
+  let ve=null;
+  if(points.length<=20){try{return await valhalla(points);}catch(e){if(planAbort&&planAbort.signal.aborted)throw e;ve=e;}}
+  try{return await osrm(points);}catch(e){throw new Error((ve?"Valhalla: "+(ve.message||ve)+"; ":"")+"OSRM: "+(e.message||e));}
 }
 async function osrm(points){
   const coords=points.map(p=>p.lon.toFixed(6)+","+p.lat.toFixed(6)).join(";");
@@ -442,7 +462,7 @@ async function plan(alt){
   if(!state.start.sel||!state.end.sel){showErr("Kies een vertrek- en eindpunt uit de suggestielijst.");return;}
   const missing=pts.findIndex(p=>!p.sel);
   if(missing>=0){showErr("Tussenpunt '"+pts[missing].text+"' is niet gekozen uit de lijst. Kies een suggestie of verwijder het.");return;}
-  save();stopSpeaking();stopWalk();stopSim();$("steps").innerHTML="";curStep=null;$("fatal").classList.add("hidden");show("loading");
+  save();stopSpeaking();stopWalk();stopSim();planErrs=[];$("steps").innerHTML="";curStep=null;$("fatal").classList.add("hidden");show("loading");
   planAbort=new AbortController();const pa=planAbort;
   const overall=setTimeout(()=>pa.abort(),120000);
   const mins=+$("dur").value,spd=+$("spd").value,target=mins/60*spd;
@@ -451,7 +471,7 @@ async function plan(alt){
   try{
     step("Basisroute berekenen");
     let base;
-    try{base=await routeWalk(fixed);}catch(e){if(pa.signal.aborted)throw e;stepFail("routeplanner niet bereikbaar, ik gebruik een schatting");base={km:rawKm(fixed)*1.3,geom:null};}
+    try{base=await routeWalk(fixed);}catch(e){if(pa.signal.aborted)throw e;stepFail("routeplanner niet bereikbaar ("+(e.message||e)+"), ik gebruik een schatting");base={km:rawKm(fixed)*1.3,geom:null};}
     let f=Math.max(1.1,Math.min(1.8,base.km/Math.max(rawKm(fixed),0.05)));
     const spare=Math.max(0,target-base.km);
     // zoekgebied
@@ -476,13 +496,13 @@ async function plan(alt){
       });
       cands=[...seen.values()].filter(c=>c.score>0);
       stepNote(cands.length+" gevonden");
-    }catch(e){ if(pa.signal.aborted)throw e; stepFail("kaartgegevens niet bereikbaar, ik ga verder zonder"); }
+    }catch(e){ if(pa.signal.aborted)throw e; stepFail("kaartgegevens niet bereikbaar ("+(e.message||e)+"), ik ga verder zonder"); }
     const maxSights=Math.max(3,Math.min(17-fixed.length+2,Math.round(mins/10)));
     let seq=greedyFill(fixed.slice(),cands,target,f,maxSights);
     step("Wandelroute uitrekenen");
     let rt=null;
     for(let it=0;it<5;it++){
-      try{rt=await routeWalk(seq);}catch(e){if(pa.signal.aborted)throw e;stepFail("routeplanner niet bereikbaar");rt=null;break;}
+      try{rt=await routeWalk(seq);}catch(e){if(pa.signal.aborted)throw e;stepFail("routeplanner niet bereikbaar ("+(e.message||e)+")");rt=null;break;}
       const rk=rawKm(seq); if(rk>0.05) f=Math.max(1.05,Math.min(2,rt.km/rk));
       if(rt.km>target*1.12&&removeWeakest(seq,f))continue;
       if(rt.km<target*0.85&&it<3){const before=seq.length;seq=greedyFill(seq,cands,target,f,maxSights);if(seq.length>before)continue;}
@@ -493,7 +513,7 @@ async function plan(alt){
     const stops=seq.map(p=>({name:p.name,lat:p.lat,lon:p.lon,kind:p.kind,type:p.type||"",cats:p.cats||[],address:p.address||"",tags:p.tags||{},text:"",lang:"nl",src:null}));
     await addTexts(stops);
     step("Kaart tekenen");
-    route={engine:rt.engine||"",stops,km:rt.km,geom:rt.geom,legs:rt.legs||null,steps:rt.steps||[],approx:!!rt.approx,target,mins,spd,poiCount:cands.length,done:[]};
+    route={errs:planErrs.slice(),engine:rt.engine||"",stops,km:rt.km,geom:rt.geom,legs:rt.legs||null,steps:rt.steps||[],approx:!!rt.approx,target,mins,spd,poiCount:cands.length,done:[]};
     store.set("route",route);
     showResult();
   }catch(e){
@@ -596,6 +616,7 @@ function showResult(){
   if(route.engine==="osrm"&&$("quiet").checked)note.push("De routeplanner voor rustige straatjes was niet bereikbaar; deze route volgt de kortste weg.");
   if(route.km>route.target*1.15)note.push("De vaste punten liggen verder uit elkaar dan de gekozen duur toelaat; er zijn alleen stops op de weg toegevoegd.");
   if(!sights)note.push(route.poiCount?"Geen bezienswaardigheden gevonden die in de tijd passen. Verleng de duur of kies meer interesses.":"Er zijn in OpenStreetMap geen bezienswaardigheden gevonden in deze buurt, of de dienst was niet bereikbaar.");
+  if(route.errs&&route.errs.length)note.push("Details: "+route.errs.join(" · "));
   $("rnote").textContent=note.join(" ");
   drawMap();renderStops();renderVoiceSel();impStatus();
 }
