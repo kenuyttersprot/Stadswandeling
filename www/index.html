@@ -148,8 +148,8 @@ body.dark .leaflet-tile-pane{filter:brightness(.55) contrast(1.15)}
             <li>Ga naar <a href="https://platform.claude.com/" target="_blank" rel="noopener">platform.claude.com</a> en maak een account aan of log in. Dat is de Claude Console, los van claude.ai.</li>
             <li><b>Let op:</b> je abonnement op claude.ai en de kaart die je daar koppelde, gelden hier niet. De Console wordt apart betaald, met vooraf gekocht tegoed.</li>
             <li>Ga naar <b>Settings › Billing</b>, kies <b>Buy credits</b> en koop een klein bedrag, bijvoorbeeld 5 à 10 dollar. Zet automatisch bijladen uit als je wil dat het nooit meer kost dan je oplaadde.</li>
-            <li>Ga naar <a href="https://platform.claude.com/settings/keys" target="_blank" rel="noopener">Settings › API keys</a> en maak een nieuwe sleutel aan, bijvoorbeeld met de naam "Stadswandeling".</li>
-            <li>Kopieer de sleutel meteen. Hij begint met <code>sk-ant-</code>. Plak hem hierboven en tik op <b>Test</b>.</li>
+            <li>Ga naar <a href="https://platform.claude.com/settings/keys" target="_blank" rel="noopener">Settings › API keys</a> en kies <b>Create key</b>. Bij "naam" typ je gewoon een label, bijvoorbeeld <i>Stadswandeling</i>, zonder "sk-ant-".</li>
+            <li>De Console toont daarna de sleutel zelf. Die begint met <code>sk-ant-</code>. Kopieer hem meteen, plak hem hierboven en tik op <b>Test</b>.</li>
           </ol>
           <div class="hint">De sleutel blijft alleen op dit toestel. Wie hem heeft, kan op jouw tegoed werken: deel hem dus niet.</div>
         </details>
@@ -411,8 +411,10 @@ function scoreOf(t,cats,ints){
 
 /* ================= Claude: eigen opzoekwerk en uitleg ================= */
 const CLAUDE_URL="https://api.anthropic.com/v1/messages",CLAUDE_VERSION="2026-10-21";
-function rawKey(){return (store.get("akey")||"").trim();}
-function appMode(){return store.get("mode")||"free";}
+const BUILT_IN_KEY="__CLAUDE_KEY__"; // wordt bij het bouwen van de Android-app ingevuld vanuit een GitHub-geheim
+function builtInKey(){return /^sk-ant-/.test(BUILT_IN_KEY)?BUILT_IN_KEY:"";}
+function rawKey(){return (store.get("akey")||"").trim()||builtInKey();}
+function appMode(){return store.get("mode")||(builtInKey()?"claude":"free");}
 function apiKey(){return appMode()==="claude"?rawKey():"";}
 const PRICE={"claude-sonnet-5-5":{in:2,out:10},"claude-haiku-5-5":{in:1,out:5}};
 function usageCost(u,model){if(!u)return 0;const p=PRICE[model]||PRICE["claude-sonnet-5-5"];
@@ -424,10 +426,11 @@ function fmtUsd(x){return "$"+x.toFixed(2).replace(".",",");}
 function updModeBadges(){
   const m=appMode(),k=rawKey();
   document.querySelectorAll("#modechips .chip").forEach(b=>b.setAttribute("aria-pressed",b.dataset.mode===m));
-  $("claudebox").classList.toggle("hidden",m!=="claude");
+  $("claudebox").classList.toggle("hidden",m!=="claude"||!!builtInKey());
   $("modehint").innerHTML=m==="free"
     ?"<b>Gratis:</b> kaart, wandelroute, aanwijzingen en bezienswaardigheden uit OpenStreetMap en Wikivoyage, met korte teksten. Er wordt niets aangerekend."
-    :(k?"<b>Betalend:</b> Claude zoekt per stop informatie op en schrijft de uitleg. Dat wordt van je API-tegoed afgetrokken, ruw geschat 5 à 15 dollarcent per stop."
+    :(builtInKey()?"<b>Betalend:</b> Claude zoekt per stop informatie op en schrijft de uitleg. De sleutel is ingebouwd; het verbruik gaat van het tegoed van de eigenaar van de app, ruw geschat 5 à 15 dollarcent per stop."
+     :k?"<b>Betalend:</b> Claude zoekt per stop informatie op en schrijft de uitleg. Dat wordt van je API-tegoed afgetrokken, ruw geschat 5 à 15 dollarcent per stop."
        :"<b>Betalend, maar nog geen sleutel:</b> zonder API-sleutel werkt de app gratis verder. Hieronder lees je hoe je een sleutel aanmaakt.");
   const rb=$("rmode");if(rb){
     if(m==="claude"&&k){rb.textContent="💳 Betalende modus (Claude)"+(route&&route.cost?" · kost deze wandeling tot nu: ± "+fmtUsd(route.cost):"");rb.style.background="#fdf0e6";}

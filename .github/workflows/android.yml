@@ -29,6 +29,17 @@ jobs:
       - name: Versienummer in de app zetten
         run: sed -i "s/__APP_VERSION__/1.${{ github.run_number }}/" www/index.html
 
+      - name: Claude-sleutel inbouwen (uit GitHub-geheim)
+        env:
+          CLAUDE_KEY: ${{ secrets.CLAUDE_API_KEY }}
+        run: |
+          if [ -n "$CLAUDE_KEY" ]; then
+            python3 -c "import os,pathlib;p=pathlib.Path('www/index.html');p.write_text(p.read_text().replace('__CLAUDE_KEY__',os.environ['CLAUDE_KEY'].strip()))"
+            echo "Sleutel ingebouwd"
+          else
+            echo "Geen geheim CLAUDE_API_KEY gevonden: app werkt zonder ingebouwde sleutel"
+          fi
+
       - name: Web-app naar Android kopiëren
         run: npx cap sync android
 
