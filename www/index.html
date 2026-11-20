@@ -125,6 +125,9 @@ body.dark .leaflet-tile-pane{filter:brightness(.55) contrast(1.15)}
     <div class="card">
       <label class="lbl">Wat interesseert jullie?</label>
       <div class="chips" id="chips"></div>
+      <label class="lbl">Hoeveel uitleg per stop?</label>
+      <div class="chips" id="detail"></div>
+      <div class="hint" id="detailhint"></div>
     </div>
 
     <button class="primary" id="go" type="button">Plan de wandeling</button>
@@ -311,14 +314,18 @@ $("addwp").onclick=()=>{state.waypoints.push({text:"",sel:null});renderWps();con
 function renderChips(){const box=$("chips");box.innerHTML="";INTERESTS.forEach(t=>{const b=document.createElement("button");b.type="button";b.className="chip";b.textContent=t;b.setAttribute("aria-pressed",state.interests.has(t));b.onclick=()=>{state.interests.has(t)?state.interests.delete(t):state.interests.add(t);b.setAttribute("aria-pressed",state.interests.has(t));save();};box.append(b);});}
 function updSliders(){const m=+$("dur").value,v=+$("spd").value;$("durv").textContent=fmtDur(m);$("spdv").textContent=v.toFixed(1).replace(".",",")+" km/u";$("kmhint").textContent="Dat is ongeveer "+fmtKm(m/60*v)+" wandelen.";}
 ["dur","spd"].forEach(id=>$(id).addEventListener("input",()=>{updSliders();save();}));
+const DETAILS=[["kort","Kort","± 30 seconden: de essentie in een paar zinnen."],["normaal","Normaal","± 1 minuut: wat je ziet en waarom het bijzonder is."],["lang","Uitgebreid","± 2 à 3 minuten: inclusief de geschiedenis van het gebouw."]];
+const DETAIL_CHARS={kort:380,normaal:950,lang:2400};
+state.detail="normaal";
+function renderDetail(){const box=$("detail");box.innerHTML="";DETAILS.forEach(([k,l,hint])=>{const b=document.createElement("button");b.type="button";b.className="chip";b.textContent=l;b.setAttribute("aria-pressed",state.detail===k);b.onclick=()=>{state.detail=k;renderDetail();save();};box.append(b);if(state.detail===k)$("detailhint").textContent=hint;});}
 function clean(m){return {text:m.text,sel:m.sel};}
-function save(){store.set("form",{start:clean(state.start),end:clean(state.end),wps:state.waypoints.map(clean),dur:$("dur").value,spd:$("spd").value,ints:[...state.interests]});}
+function save(){store.set("form",{start:clean(state.start),end:clean(state.end),wps:state.waypoints.map(clean),dur:$("dur").value,spd:$("spd").value,ints:[...state.interests],detail:state.detail});}
 function load(){
   const f=store.get("form");
   if(f){const m=v=>v&&typeof v==="object"?{text:String(v.text||""),sel:v.sel||null}:{text:"",sel:null};
     state.start=m(f.start);state.end=m(f.end);state.waypoints=(f.wps||[]).map(m);
-    if(f.dur)$("dur").value=f.dur;if(f.spd)$("spd").value=f.spd;if(Array.isArray(f.ints))state.interests=new Set(f.ints);}
-  makeAC($("start"),state.start);makeAC($("end"),state.end);renderWps();renderChips();updSliders();
+    if(f.dur)$("dur").value=f.dur;if(f.spd)$("spd").value=f.spd;if(Array.isArray(f.ints))state.interests=new Set(f.ints);if(f.detail)state.detail=f.detail;}
+  makeAC($("start"),state.start);makeAC($("end"),state.end);renderWps();renderChips();renderDetail();updSliders();
   const r=store.get("route");if(r&&r.stops){route=r;showResult();}
 }
 $("myloc").onclick=()=>{
@@ -400,12 +407,48 @@ async function wikiCandidates(line,radiusM,langs,ints){
   }));
   return [...found.values()];
 }
+/* ---- Wikivoyage: lokale tips van reizigers en inwoners ---- */
+function splitTop(s){const out=[];let depth=0,cur="";for(let i=0;i<s.length;i++){const two=s.substr(i,2);
+  if(two==="{{"||two==="[["){depth++;cur+=two;i++;continue;} if(two==="}}"||two==="]]"){depth--;cur+=two;i++;continue;}
+  if(s[i]==="|"&&depth===0){out.push(cur);cur="";continue;} cur+=s[i];} out.push(cur);return out;}
+function wikiClean(t){return t.replace(/<ref[^>]*\/>/g,"").replace(/<ref[\s\S]*?<\/ref>/g,"").replace(/<[^>]+>/g,"").replace(/\{\{[^{}]*\}\}/g,"").replace(/\[\[(?:[^|\]]*\|)?([^\]]*)\]\]/g,"$1").replace(/\[https?:[^\s\]]+\s?([^\]]*)\]/g,"$1").replace(/'{2,}/g,"").replace(/\s+/g," ").trim();}
+function parseListings(wt){
+  const out=[];const re=/\{\{\s*(see|do|listing|drink|eat|buy|bekijken|doen|uitgaan|eten|kopen|zien)\s*\|/gi;let m;
+  while((m=re.exec(wt))){let i=m.index+2,depth=1,j=i;while(j<wt.length&&depth>0){const two=wt.substr(j,2);if(two==="{{"){depth++;j+=2;continue;}if(two==="}}"){depth--;j+=2;continue;}j++;}
+    const body=wt.slice(m.index+2+m[1].length,j-2).replace(/^\s*/,"");const parts=splitTop(body.replace(/^\|/,""));const o={type:m[1].toLowerCase()};
+    parts.forEach(p=>{const k=p.indexOf("=");if(k>0)o[p.slice(0,k).trim().toLowerCase()]=p.slice(k+1).trim();});
+    const lat=parseFloat(o.lat),lon=parseFloat(o.long||o.lon);const name=wikiClean(o.name||o.naam||"");const txt=wikiClean(o.content||o.description||o.beschrijving||o.inhoud||"");
+    if(name&&isFinite(lat)&&isFinite(lon)&&txt.length>25)out.push({type:o.type,name,lat,lon,text:txt});
+    re.lastIndex=j;}
+  return out;}
+async function wvCandidates(line,bufKm,ints){
+  const pts=samplePoints(line,1,4);const out=[];
+  const lats=line.map(p=>p[0]),lons=line.map(p=>p[1]);const dLat=bufKm/111,dLon=bufKm/(111*Math.cos(lats[0]*Math.PI/180));
+  const bb=[Math.min(...lats)-dLat,Math.min(...lons)-dLon,Math.max(...lats)+dLat,Math.max(...lons)+dLon];
+  for(const lang of ["nl","en"]){
+    const titles=new Set();
+    for(const p of pts){try{const j=await getJSON(`https://${lang}.wikivoyage.org/w/api.php?action=query&list=geosearch&gscoord=${p.lat.toFixed(5)}|${p.lon.toFixed(5)}&gsradius=10000&gslimit=4&format=json&origin=*`,null,12000);(j.query&&j.query.geosearch||[]).forEach(g=>titles.add(g.title));}catch(e){}}
+    const tl=[...titles].slice(0,6);if(!tl.length)continue;
+    try{
+      const j=await getJSON(`https://${lang}.wikivoyage.org/w/api.php?action=query&prop=revisions&rvprop=content&rvslots=main&formatversion=2&format=json&origin=*&titles=`+encodeURIComponent(tl.join("|")),null,20000);
+      (j.query&&j.query.pages||[]).forEach(pg=>{const wt=pg.revisions&&pg.revisions[0]&&(pg.revisions[0].slots?pg.revisions[0].slots.main.content:pg.revisions[0].content);if(!wt)return;
+        parseListings(wt).forEach(L=>{
+          if(L.lat<bb[0]||L.lat>bb[2]||L.lon<bb[1]||L.lon>bb[3])return;
+          const food=/drink|eat|uitgaan|eten/.test(L.type);if(food&&!ints.has("Koffie & aperitivo"))return;
+          if(/buy|kopen/.test(L.type))return;
+          const cats=food?["Koffie & aperitivo"]:["Verborgen plekjes",...wpCats(L.name)];
+          let score=3+(cats.some(c=>ints.has(c))?3:0)+(ints.has("Verborgen plekjes")&&!food?2:0)+(lang==="nl"?0.5:0);
+          out.push({id:"wv:"+lang+":"+L.name,lat:L.lat,lon:L.lon,name:L.name,tags:{},cats,score,kind:"sight",type:food?"café":"lokale tip",tip:{lang,text:L.text,page:pg.title}});
+        });});
+    }catch(e){}
+  }
+  return out;}
 function mergeCands(osm,wiki){
   const out=osm.slice();
   wiki.forEach(w=>{
     const wl=w.name.toLowerCase(),words=wl.split(/[\s\-']+/).filter(x=>x.length>3);
     const twin=out.find(c=>hav(c,w)<0.12&&(c.name.toLowerCase()===wl||words.some(x=>c.name.toLowerCase().includes(x))));
-    if(twin){ if(!twin.tags.wikipedia&&!twin.tags.wikidata){twin.tags.wikipedia=w.tags.wikipedia;twin.score+=3;} return; }
+    if(twin){ if(w.tags.wikipedia&&!twin.tags.wikipedia&&!twin.tags.wikidata){twin.tags.wikipedia=w.tags.wikipedia;twin.score+=3;} if(w.tip&&!twin.tip){twin.tip=w.tip;twin.score+=1.5;} return; }
     if(out.some(c=>hav(c,w)<0.04))return;
     out.push(w);
   });
@@ -570,6 +613,13 @@ async function plan(alt){
       if(alt)cands.forEach(c=>{if(c.fromWiki)c.score*=0.4+Math.random()*1.2;});
       stepNote(wc.length+" artikels, "+(cands.length-before)+" extra plekken");
     }catch(e){ if(pa.signal.aborted)throw e; stepFail("Wikipedia niet bereikbaar ("+(e.message||e)+")"); }
+    step("Lokale tips zoeken (Wikivoyage)");
+    try{
+      const line=(base.geom&&base.geom.length>1)?base.geom:fixed.map(p=>[p.lat,p.lon]);
+      const wv=await wvCandidates(line,Math.max(0.4,Math.min(1.5,bufKm*0.7)),ints);
+      const before=cands.length;cands=mergeCands(cands,wv);
+      stepNote(wv.length+" tips, "+(cands.length-before)+" extra plekken");
+    }catch(e){ if(pa.signal.aborted)throw e; stepFail("Wikivoyage niet bereikbaar ("+(e.message||e)+")"); }
     route_candCount=cands.length;
     const maxSights=Math.max(3,Math.min(17-fixed.length+2,Math.round(mins/10)));
     let seq=greedyFill(fixed.slice(),cands,target,f,maxSights);
@@ -585,7 +635,7 @@ async function plan(alt){
     if(!rt){rt={km:rawKm(seq)*f,geom:null,legs:null,approx:true};}
     step("Uitleg ophalen");
     await addWikidataIds(seq.filter(p=>p.kind==="sight"));
-    const stops=seq.map(p=>({name:p.name,lat:p.lat,lon:p.lon,kind:p.kind,type:p.type||"",cats:p.cats||[],address:p.address||"",tags:p.tags||{},text:"",lang:"nl",src:null}));
+    const stops=seq.map(p=>({tip:p.tip||null,name:p.name,lat:p.lat,lon:p.lon,kind:p.kind,type:p.type||"",cats:p.cats||[],address:p.address||"",tags:p.tags||{},text:"",lang:"nl",src:null}));
     await addTexts(stops);
     step("Kaart tekenen");
     route={errs:planErrs.slice(),engine:rt.engine||"",stops,km:rt.km,geom:rt.geom,legs:rt.legs||null,steps:rt.steps||[],approx:!!rt.approx,target,mins,spd,poiCount:route_candCount,done:[]};
@@ -603,8 +653,9 @@ function msg(t){$("lmsg").textContent=t;}
 /* ================= texts (Wikipedia + OSM) ================= */
 async function wikiExtracts(lang,titles,full){
   const out={};
-  for(let i=0;i<titles.length;i+=20){
-    const chunk=titles.slice(i,i+20);
+  const per=full?1:20; // volledige artikels geeft de API maar één per keer
+  const groups=[];for(let i=0;i<titles.length;i+=per)groups.push(titles.slice(i,i+per));
+  await Promise.all(groups.map(async chunk=>{
     const url=`https://${lang}.wikipedia.org/w/api.php?action=query&prop=extracts${full?"":"&exintro=1"}&explaintext=1&exlimit=20&redirects=1&format=json&origin=*&titles=`+encodeURIComponent(chunk.join("|"));
     try{
       const j=await getJSON(url,null,15000);const q=j.query||{};
@@ -612,7 +663,7 @@ async function wikiExtracts(lang,titles,full){
       const pages=Object.values(q.pages||{});
       chunk.forEach(t=>{let tt=map[t]||t;tt=map[tt]||tt;const p=pages.find(p=>p.title===tt);if(p&&p.extract)out[t]={title:p.title,text:p.extract};});
     }catch(e){}
-  }
+  }));
   return out;
 }
 function trimText(t,max){
@@ -621,6 +672,15 @@ function trimText(t,max){
   const cut=t.slice(0,max);const i=Math.max(cut.lastIndexOf(". "),cut.lastIndexOf(".\n"));
   return (i>max*0.4?cut.slice(0,i+1):cut+"…").trim();
 }
+function introOf(t){const i=t.search(/\n==/);return i>0?t.slice(0,i):t;}
+function sectionsOf(t){const out={};const re=/\n(==+)\s*([^=\n]+?)\s*\1\s*\n/g;let m,last=null,lastIdx=0;
+  while((m=re.exec(t))){if(last)out[last]=(out[last]||"")+t.slice(lastIdx,m.index);last=m[2].trim();lastIdx=re.lastIndex;}
+  if(last)out[last]=(out[last]||"")+t.slice(lastIdx);return out;}
+function composeLong(t,lim){
+  const intro=trimText(introOf(t),Math.round(lim*0.4));const secs=sectionsOf(t);
+  const key=Object.keys(secs).find(k=>/geschiedenis|historie|history|storia|histoire|geschichte|bouw|architectuur|architecture|architettura|beschrijving|description/i.test(k));
+  if(!key)return trimText(introOf(t),lim);
+  return intro+"\n\n"+key.charAt(0).toUpperCase()+key.slice(1)+": "+trimText(secs[key].replace(/\n==+[^=]+==+\n/g,"\n"),lim-intro.length);}
 function tagText(s){
   const t=s.tags||{};let parts=[];
   if(s.kind==="start")return "Hier begint jullie wandeling"+(s.address?" ("+s.address+")":"")+". Veel plezier!";
@@ -667,11 +727,16 @@ async function addTexts(stops){
   }));
   // fetch extracts
   const res={};
-  await Promise.all(Object.entries(byLang).map(async([l,ts])=>{res[l]=await wikiExtracts(l,[...new Set(ts)],false);}));
+  const lim=DETAIL_CHARS[state.detail]||950,long=state.detail==="lang";
+  await Promise.all(Object.entries(byLang).map(async([l,ts])=>{res[l]=await wikiExtracts(l,[...new Set(ts)],long);}));
   stops.forEach(s=>{
     const ex=s._wl&&res[s._wl]&&res[s._wl][s._wt];
-    if(ex&&ex.text&&ex.text.length>40){s.text=trimText(ex.text,1300);s.lang=s._wl;s.src={lang:s._wl,title:ex.title};}
+    if(ex&&ex.text&&ex.text.length>40){
+      if(long){s.full=ex.text;s.text=composeLong(ex.text,lim);} else s.text=trimText(introOf(ex.text),lim);
+      s.lang=s._wl;s.src={lang:s._wl,title:ex.title};}
+    else if(s.tip){s.text=trimText(s.tip.text,lim);s.lang=s.tip.lang;s.src={wv:true,lang:s.tip.lang,title:s.tip.page};s.tipUsed=true;}
     else{s.text=tagText(s);s.lang="nl";}
+    if(s.tip&&!s.tipUsed&&s.tip.lang===s.lang&&state.detail!=="kort"){s.text+="\n\nLokale tip: "+trimText(s.tip.text,350);}
     delete s._wl;delete s._wt;
   });
 }
@@ -726,12 +791,17 @@ function renderStops(){
     d.querySelector(".smeta").textContent=lbl+leg;
     d.querySelector(".stext").textContent=s.text;
     const src=d.querySelector(".src");
-    if(s.src){const a=document.createElement("a");a.href=`https://${s.src.lang}.wikipedia.org/wiki/`+encodeURIComponent(s.src.title.replace(/ /g,"_"));a.target="_blank";a.rel="noopener";a.textContent="Wikipedia"+(s.src.lang!=="nl"?" ("+s.src.lang+")":"");src.append("Bron: ",a);}
+    if(s.src&&s.src.wv){const a=document.createElement("a");a.href=`https://${s.src.lang}.wikivoyage.org/wiki/`+encodeURIComponent(s.src.title.replace(/ /g,"_"));a.target="_blank";a.rel="noopener";a.textContent="Wikivoyage"+(s.src.lang!=="nl"?" ("+s.src.lang+")":"");src.append("Bron: ",a);}
+    else if(s.src){const a=document.createElement("a");a.href=`https://${s.src.lang}.wikipedia.org/wiki/`+encodeURIComponent(s.src.title.replace(/ /g,"_"));a.target="_blank";a.rel="noopener";a.textContent="Wikipedia"+(s.src.lang!=="nl"?" ("+s.src.lang+")":"");src.append("Bron: ",a);}
     else if(s.kind==="sight")src.textContent="Bron: OpenStreetMap-gegevens";
     d.querySelector(".shead").onclick=()=>{d.classList.contains("open")?d.classList.remove("open","active"):openStop(i,false);};
     const btns=d.querySelector(".btns");
     const sp=btn("🔊 Voorlezen");sp.onclick=()=>toggleSpeak(sp,s.name+". "+s.text,s.lang);btns.append(sp);
-    if(s.src){const m=btn("📖 Vertel meer");m.onclick=()=>tellMore(i,m,d);btns.append(m);}
+    if(s.src&&!s.src.wv){const m=btn("📖 Vertel meer");m.onclick=()=>tellMore(i,m,d);btns.append(m);}
+    if(s.kind==="sight"){const city=(state.end.sel&&state.end.sel.address||"").split(",").slice(-2,-1)[0]||"";
+      const q=encodeURIComponent((s.name+" "+city).trim());
+      const ao=document.createElement("a");ao.className="secondary";ao.target="_blank";ao.rel="noopener";ao.href="https://www.atlasobscura.com/search?q="+q;ao.textContent="🔎 Atlas Obscura";btns.append(ao);
+      const ta=document.createElement("a");ta.className="secondary";ta.target="_blank";ta.rel="noopener";ta.href="https://www.tripadvisor.com/Search?q="+q;ta.textContent="🔎 Tripadvisor";btns.append(ta);}
     if(i>0){const a=document.createElement("a");a.className="secondary";a.href=gUrl(route.stops[i-1],s);a.target="_blank";a.rel="noopener";a.textContent="🧭 Google Maps";btns.append(a);}
     box.append(d);
   });
