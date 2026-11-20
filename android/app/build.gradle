@@ -1,3 +1,5 @@
+def buildNr = (System.getenv("GITHUB_RUN_NUMBER") ?: "0").toInteger()
+
 apply plugin: 'com.android.application'
 
 android {
@@ -7,8 +9,8 @@ android {
         applicationId "be.dasbest.stadswandeling"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode (System.getenv("GITHUB_RUN_NUMBER") ?: "1").toInteger() + 1
-        versionName "1." + (System.getenv("GITHUB_RUN_NUMBER") ?: "0")
+        versionCode buildNr + 1
+        versionName "1." + buildNr
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
