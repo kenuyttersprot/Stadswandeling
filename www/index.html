@@ -518,10 +518,42 @@ async function valhalla(points){
   });
   return {km:j.trip.summary.length,geom,legs,steps,engine:"valhalla"};
 }
-async function routeWalk(points){
-  let ve=null;
-  if(points.length<=20){try{return await valhalla(points);}catch(e){if(planAbort&&planAbort.signal.aborted)throw e;ve=e;}}
-  try{return await osrm(points);}catch(e){throw new Error((ve?"Valhalla: "+(ve.message||ve)+"; ":"")+"OSRM: "+(e.message||e));}
+const legCache=new Map();let lastRouteCall=0;
+async function politeWait(){const d=Date.now()-lastRouteCall;if(d<700)await sleep(700-d);lastRouteCall=Date.now();}
+async function withRetry(fn){
+  try{await politeWait();return await fn();}
+  catch(e){if(planAbort&&planAbort.signal.aborted)throw e;
+    if(/429|too many|rate/i.test(String(e.message||e))){await sleep(2000);await politeWait();return await fn();}
+    throw e;}
+}
+async function routeChunk(points){
+  const key=points.map(p=>p.lat.toFixed(5)+","+p.lon.toFixed(5)).join(";");
+  if(legCache.has(key))return legCache.get(key);
+  let ve=null,r=null;
+  try{r=await withRetry(()=>valhalla(points));}catch(e){if(planAbort&&planAbort.signal.aborted)throw e;ve=e;}
+  if(!r){try{r=await withRetry(()=>osrm(points));}catch(e){if(planAbort&&planAbort.signal.aborted)throw e;throw new Error((ve?"Valhalla: "+(ve.message||ve)+"; ":"")+"OSRM: "+(e.message||e));}}
+  legCache.set(key,r);return r;
+}
+function straightChunk(points){const legs=[];for(let i=1;i<points.length;i++)legs.push(hav(points[i-1],points[i])*1.3);
+  return {km:legs.reduce((a,b)=>a+b,0),geom:points.map(p=>[p.lat,p.lon]),legs,steps:[],engine:"schatting",approx:true};}
+async function routeWalk(points,opts){
+  const CH=8,parts=[];
+  for(let i=0;i<points.length-1;i+=CH-1)parts.push(points.slice(i,Math.min(i+CH,points.length)));
+  let km=0,geom=[],legs=[],steps=[],engines=new Set(),failed=0,lastErr=null;
+  for(let k=0;k<parts.length;k++){
+    let r;
+    try{r=await routeChunk(parts[k]);}
+    catch(e){if(planAbort&&planAbort.signal.aborted)throw e;lastErr=e;failed++;r=straightChunk(parts[k]);}
+    const off=legs.length;
+    km+=r.km;legs.push(...r.legs);
+    const g=r.geom.slice();if(geom.length)g.shift();geom.push(...g);
+    r.steps.forEach(s=>{if(k>0&&s.type==="depart")return;steps.push(Object.assign({},s,{leg:s.leg+off}));});
+    engines.add(r.engine);
+  }
+  if(failed===parts.length)throw lastErr||new Error("geen route");
+  const res={km,geom,legs,steps,engine:[...engines].join("+")};
+  if(failed){res.partial=failed;res.partialErr=String(lastErr&&lastErr.message||lastErr);}
+  return res;
 }
 async function osrm(points){
   const coords=points.map(p=>p.lon.toFixed(6)+","+p.lat.toFixed(6)).join(";");
@@ -621,7 +653,7 @@ async function plan(alt){
       stepNote(wv.length+" tips, "+(cands.length-before)+" extra plekken");
     }catch(e){ if(pa.signal.aborted)throw e; stepFail("Wikivoyage niet bereikbaar ("+(e.message||e)+")"); }
     route_candCount=cands.length;
-    const maxSights=Math.max(3,Math.min(17-fixed.length+2,Math.round(mins/10)));
+    const maxSights=Math.max(3,Math.min(18,Math.round(mins/10)));
     let seq=greedyFill(fixed.slice(),cands,target,f,maxSights);
     step("Wandelroute uitrekenen");
     let rt=null;
@@ -633,6 +665,7 @@ async function plan(alt){
       break;
     }
     if(!rt){rt={km:rawKm(seq)*f,geom:null,legs:null,approx:true};}
+    else if(rt.partial)stepFail(rt.partial+" deel(en) van de route konden niet berekend worden ("+rt.partialErr+"); daar staat een rechte lijn");
     step("Uitleg ophalen");
     await addWikidataIds(seq.filter(p=>p.kind==="sight"));
     const stops=seq.map(p=>({tip:p.tip||null,name:p.name,lat:p.lat,lon:p.lon,kind:p.kind,type:p.type||"",cats:p.cats||[],address:p.address||"",tags:p.tags||{},text:"",lang:"nl",src:null}));
@@ -753,7 +786,7 @@ function showResult(){
   $("rstats").innerHTML=`<span class="stat"><b>${route.stops.length}</b> stops</span><span class="stat"><b>${sights}</b> bezienswaardigheden</span><span class="stat">${route.approx?"± ":""}<b>${fmtKm(route.km)}</b></span><span class="stat">± <b>${fmtDur(Math.round(mins/5)*5)}</b></span>`;
   let note=[];
   if(route.approx)note.push("De routeplanner was niet bereikbaar: de lijn op de kaart is een benadering.");
-  if(route.engine==="osrm"&&$("quiet").checked)note.push("De routeplanner voor rustige straatjes was niet bereikbaar; deze route volgt de kortste weg.");
+  if(/osrm/.test(route.engine||"")&&$("quiet").checked)note.push("De routeplanner voor rustige straatjes was niet bereikbaar; deze route volgt de kortste weg.");
   if(route.km>route.target*1.15)note.push("De vaste punten liggen verder uit elkaar dan de gekozen duur toelaat; er zijn alleen stops op de weg toegevoegd.");
   if(!sights)note.push(route.poiCount?"Geen bezienswaardigheden gevonden die in de tijd passen. Verleng de duur of kies meer interesses.":"Er zijn in OpenStreetMap geen bezienswaardigheden gevonden in deze buurt, of de dienst was niet bereikbaar.");
   if(route.poiCount!=null)note.push(route.poiCount+" mogelijke bezienswaardigheden gevonden in de buurt; de beste "+sights+" passen in jullie tijd.");
