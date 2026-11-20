@@ -197,7 +197,7 @@ function step(t){ // sluit vorige stap af en start nieuwe
   if(curStep){curStep.textContent="✓ "+curStep.dataset.t+" ("+((now-stepT0)/1000).toFixed(1)+" s)";}
   stepT0=now;const li=document.createElement("li");li.dataset.t=t;li.textContent="… "+t;$("steps").append(li);curStep=li;$("lmsg").textContent=t;
 }
-let planErrs=[];
+let planErrs=[],route_candCount=0;
 function stepFail(why){planErrs.push((curStep?curStep.dataset.t+": ":"")+why);if(curStep){curStep.textContent="✗ "+curStep.dataset.t+": "+why;curStep.style.color="#7d2a17";curStep=null;}}
 function stepNote(t){if(curStep)curStep.textContent="… "+curStep.dataset.t+" ("+t+")";}
 function fatal(m){const f=$("fatal");f.textContent="Er ging iets mis: "+m;f.classList.remove("hidden");}
@@ -245,7 +245,7 @@ function photonLabel(p){
   const addr=[street,place,pr.country].filter(Boolean).join(", ");
   const name=pr.name||street||place||"Onbekend";
   const kind=TYPE_NL[pr.osm_value]||TYPE_NL[pr.osm_key]||"";
-  return {name, address:addr, kind, lat:p.geometry.coordinates[1], lon:p.geometry.coordinates[0]};
+  return {name, address:addr, kind, cc:(pr.countrycode||"").toUpperCase(), lat:p.geometry.coordinates[1], lon:p.geometry.coordinates[0]};
 }
 function makeAC(input,model){
   const w=document.createElement("div");w.className="acwrap";
@@ -354,12 +354,74 @@ function scoreOf(t,cats,ints){
   const cafe=t.amenity==="cafe"||t.amenity==="bar";
   if(cafe&&!ints.has("Koffie & aperitivo"))return 0;
   let s=1;
-  if(cats.some(c=>ints.has(c)))s+=4; else if(ints.size)s-=0.5;
+  const famous=!!(t.wikipedia||t.wikidata);
+  if(cats.some(c=>ints.has(c)))s+=4; else if(ints.size){ if(!famous)return 0; s-=0.5; }
   if(t.wikipedia||t.wikidata)s+=3;
   if(t.tourism==="attraction"||t.tourism==="museum")s+=1;
   if(t.heritage)s+=1;
   if(cafe)s-=1.5;
   return Math.max(s,0);
+}
+
+/* ================= Wikipedia als bron van bezienswaardigheden ================= */
+const CC_LANG={IT:"it",FR:"fr",DE:"de",AT:"de",CH:"de",ES:"es",PT:"pt",NL:"nl",BE:"nl",GB:"en",IE:"en",US:"en",CZ:"cs",PL:"pl",HU:"hu",GR:"el",HR:"hr",DK:"da",SE:"sv",NO:"no"};
+const WP_SKIP=/stazione|metropolitana|fermata|\blinea\b|\bstation\b|\bmetro\b|\(quartiere\)|municipio \d|\bscuola\b|\bliceo\b|ospedale|universit|\bhotel\b|banca|s\.p\.a|\bcalcio\b|stadio|\bvia\b|\bviale\b|\bcorso\b|\bstraat\b|\bstreet\b|\brue\b|tram|bus|\bgemeente\b|\bcomune\b|\bwijk\b|\bdistrict\b|parrocchia|\bschool\b|ziekenhuis|bedrijf|azienda/i;
+function wpCats(title){const t=title.toLowerCase();const c=[];
+  if(/chiesa|basilica|duomo|cattedrale|kerk|church|cathedral|kapel|cappella|chapel|abbazia|abdij|santuario|\bsan |\bsanta |\bsant'|sint-/.test(t))c.push("Kerken");
+  if(/museo|museum|pinacoteca|galleria d|gallery|biblioteca|pinakothek/.test(t))c.push("Musea & kunst");
+  if(/palazzo|paleis|castello|kasteel|castle|torre|toren|tower|teatro|theater|villa|loggia|arco|porta|gate|monument|colonne|colonna/.test(t))c.push("Architectuur","Geschiedenis");
+  if(/piazza|plein|square|parco|park|giardin|tuin|garden/.test(t))c.push("Pleinen & parken");
+  if(/molen|mill|mulino/.test(t))c.push("Verborgen plekjes","Geschiedenis");
+  if(!c.length)c.push("Geschiedenis");
+  return c;}
+function samplePoints(line,stepKm,max){
+  const out=[{lat:line[0][0],lon:line[0][1]}];let acc=0;
+  for(let i=1;i<line.length;i++){const a={lat:line[i-1][0],lon:line[i-1][1]},b={lat:line[i][0],lon:line[i][1]};acc+=hav(a,b);if(acc>=stepKm){out.push(b);acc=0;}}
+  const last=line[line.length-1];out.push({lat:last[0],lon:last[1]});
+  if(out.length<=max)return out;const r=[];for(let i=0;i<max;i++)r.push(out[Math.round(i*(out.length-1)/(max-1))]);return r;
+}
+async function wikiCandidates(line,radiusM,langs,ints){
+  const pts=samplePoints(line,Math.max(0.4,radiusM/1000),10);
+  const found=new Map();
+  await Promise.all(langs.map(async lang=>{
+    for(const p of pts){
+      try{
+        const j=await getJSON(`https://${lang}.wikipedia.org/w/api.php?action=query&list=geosearch&gscoord=${p.lat.toFixed(5)}|${p.lon.toFixed(5)}&gsradius=${Math.round(Math.min(10000,radiusM))}&gslimit=60&format=json&origin=*`,null,12000);
+        (j.query&&j.query.geosearch||[]).forEach(g=>{
+          if(WP_SKIP.test(g.title))return;
+          const key=lang+":"+g.pageid;if(found.has(key))return;
+          const cats=wpCats(g.title);
+          let score=2.5+(cats.some(c=>ints.has(c))?4:(ints.size?0.5:2));
+          if(lang==="nl")score+=0.5;
+          found.set(key,{id:"wp:"+key,lat:g.lat,lon:g.lon,name:g.title.replace(/\s*\([^)]*\)\s*$/,""),tags:{wikipedia:lang+":"+g.title},cats,score,kind:"sight",type:cats.includes("Kerken")?"kerk":cats.includes("Musea & kunst")?"museum":cats.includes("Pleinen & parken")?"plein":"bezienswaardigheid",fromWiki:true});
+        });
+      }catch(e){}
+    }
+  }));
+  return [...found.values()];
+}
+function mergeCands(osm,wiki){
+  const out=osm.slice();
+  wiki.forEach(w=>{
+    const wl=w.name.toLowerCase(),words=wl.split(/[\s\-']+/).filter(x=>x.length>3);
+    const twin=out.find(c=>hav(c,w)<0.12&&(c.name.toLowerCase()===wl||words.some(x=>c.name.toLowerCase().includes(x))));
+    if(twin){ if(!twin.tags.wikipedia&&!twin.tags.wikidata){twin.tags.wikipedia=w.tags.wikipedia;twin.score+=3;} return; }
+    if(out.some(c=>hav(c,w)<0.04))return;
+    out.push(w);
+  });
+  return out;
+}
+async function addWikidataIds(stops){ // QID ophalen zodat we de Nederlandse versie van het artikel vinden
+  const byLang={};stops.forEach(s=>{const w=s.tags&&s.tags.wikipedia;if(w&&!s.tags.wikidata&&w.includes(":")){const [l,...r]=w.split(":");(byLang[l]=byLang[l]||[]).push({s,t:r.join(":")});}});
+  for(const [l,arr] of Object.entries(byLang)){
+    for(let i=0;i<arr.length;i+=40){const part=arr.slice(i,i+40);
+      try{const j=await getJSON(`https://${l}.wikipedia.org/w/api.php?action=query&prop=pageprops&ppprop=wikibase_item&redirects=1&format=json&origin=*&titles=`+encodeURIComponent(part.map(x=>x.t).join("|")),null,12000);
+        const q=j.query||{};const map={};(q.normalized||[]).forEach(n=>map[n.from]=n.to);(q.redirects||[]).forEach(n=>map[n.from]=n.to);
+        const pages=Object.values(q.pages||{});
+        part.forEach(x=>{let tt=map[x.t]||x.t;tt=map[tt]||tt;const pg=pages.find(p=>p.title===tt);if(pg&&pg.pageprops&&pg.pageprops.wikibase_item)x.s.tags.wikidata=pg.pageprops.wikibase_item;});
+      }catch(e){}
+    }
+  }
 }
 
 /* ================= planning ================= */
@@ -378,7 +440,7 @@ ${cafe}
 );out center tags 700;`;
   let lastErr;
   for(const ep of OVERPASS){
-    try{ return await getJSON(ep,{method:"POST",form:{data:q}},20000); }
+    try{ return await getJSON(ep+"?data="+encodeURIComponent(q.replace(/\n/g,"")),null,20000); }
     catch(e){lastErr=e; if(planAbort&&planAbort.signal.aborted)throw e; stepNote("server "+(OVERPASS.indexOf(ep)+1)+" reageerde niet, volgende proberen");}
   }
   throw lastErr||new Error("Overpass");
@@ -496,8 +558,19 @@ async function plan(alt){
         if(prev&&hav(prev,c)<0.3){ if(c.score>prev.score)seen.set(key,c); } else seen.set(key+(prev?e.id:""),c);
       });
       cands=[...seen.values()].filter(c=>c.score>0);
-      stepNote(cands.length+" gevonden");
-    }catch(e){ if(pa.signal.aborted)throw e; stepFail("kaartgegevens niet bereikbaar ("+(e.message||e)+"), ik ga verder zonder"); }
+      stepNote(cands.length+" gevonden in OpenStreetMap");
+    }catch(e){ if(pa.signal.aborted)throw e; stepFail("kaartgegevens niet bereikbaar ("+(e.message||e)+")"); }
+    step("Wikipedia doorzoeken");
+    try{
+      const cc=(pts.map(p=>p.sel&&p.sel.cc).find(Boolean)||"");
+      const langs=[...new Set(["nl","en",CC_LANG[cc]||"en"])];
+      const line=(base.geom&&base.geom.length>1)?base.geom:fixed.map(p=>[p.lat,p.lon]);
+      const wc=await wikiCandidates(line,Math.max(400,Math.min(1500,bufKm*700)),langs,ints);
+      const before=cands.length;cands=mergeCands(cands,wc);
+      if(alt)cands.forEach(c=>{if(c.fromWiki)c.score*=0.4+Math.random()*1.2;});
+      stepNote(wc.length+" artikels, "+(cands.length-before)+" extra plekken");
+    }catch(e){ if(pa.signal.aborted)throw e; stepFail("Wikipedia niet bereikbaar ("+(e.message||e)+")"); }
+    route_candCount=cands.length;
     const maxSights=Math.max(3,Math.min(17-fixed.length+2,Math.round(mins/10)));
     let seq=greedyFill(fixed.slice(),cands,target,f,maxSights);
     step("Wandelroute uitrekenen");
@@ -511,10 +584,11 @@ async function plan(alt){
     }
     if(!rt){rt={km:rawKm(seq)*f,geom:null,legs:null,approx:true};}
     step("Uitleg ophalen");
+    await addWikidataIds(seq.filter(p=>p.kind==="sight"));
     const stops=seq.map(p=>({name:p.name,lat:p.lat,lon:p.lon,kind:p.kind,type:p.type||"",cats:p.cats||[],address:p.address||"",tags:p.tags||{},text:"",lang:"nl",src:null}));
     await addTexts(stops);
     step("Kaart tekenen");
-    route={errs:planErrs.slice(),engine:rt.engine||"",stops,km:rt.km,geom:rt.geom,legs:rt.legs||null,steps:rt.steps||[],approx:!!rt.approx,target,mins,spd,poiCount:cands.length,done:[]};
+    route={errs:planErrs.slice(),engine:rt.engine||"",stops,km:rt.km,geom:rt.geom,legs:rt.legs||null,steps:rt.steps||[],approx:!!rt.approx,target,mins,spd,poiCount:route_candCount,done:[]};
     store.set("route",route);
     showResult();
   }catch(e){
@@ -617,6 +691,7 @@ function showResult(){
   if(route.engine==="osrm"&&$("quiet").checked)note.push("De routeplanner voor rustige straatjes was niet bereikbaar; deze route volgt de kortste weg.");
   if(route.km>route.target*1.15)note.push("De vaste punten liggen verder uit elkaar dan de gekozen duur toelaat; er zijn alleen stops op de weg toegevoegd.");
   if(!sights)note.push(route.poiCount?"Geen bezienswaardigheden gevonden die in de tijd passen. Verleng de duur of kies meer interesses.":"Er zijn in OpenStreetMap geen bezienswaardigheden gevonden in deze buurt, of de dienst was niet bereikbaar.");
+  if(route.poiCount!=null)note.push(route.poiCount+" mogelijke bezienswaardigheden gevonden in de buurt; de beste "+sights+" passen in jullie tijd.");
   if(route.errs&&route.errs.length)note.push("Details: "+route.errs.join(" · "));
   $("rnote").textContent=note.join(" ");
   drawMap();renderStops();renderVoiceSel();impStatus();
