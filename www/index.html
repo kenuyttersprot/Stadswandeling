@@ -94,6 +94,7 @@ body.dark .leaflet-tile-pane{filter:brightness(.55) contrast(1.15)}
 <body>
 <main>
   <div id="fatal" class="err hidden" style="margin:0 0 12px"></div>
+  <div id="netbanner" class="err hidden" style="margin:0 0 12px"></div>
   <h1>Stadswandeling</h1>
   <p class="sub">Van A naar B langs de mooiste plekken, op jouw tempo. Met kaart, GPS en voorgelezen uitleg.</p>
   <div id="appver" style="position:fixed;right:10px;bottom:8px;font-size:11px;color:var(--muted);opacity:.8;z-index:900">versie __APP_VERSION__</div>
@@ -130,6 +131,14 @@ body.dark .leaflet-tile-pane{filter:brightness(.55) contrast(1.15)}
       <div class="hint" id="detailhint"></div>
     </div>
 
+    <div class="card">
+      <label class="lbl" for="akey">Claude-uitleg</label>
+      <div class="hint" style="margin-bottom:8px">Claude zoekt zelf informatie op en schrijft per stop een gesproken uitleg. Daarvoor is een eigen API-sleutel nodig (platform.claude.com, betalen per gebruik). De sleutel blijft enkel op dit toestel.</div>
+      <input type="password" id="akey" placeholder="sk-ant-…" autocomplete="off">
+      <div class="row" style="margin-top:8px"><select id="amodel" style="flex:1"><option value="claude-sonnet-5-5">Claude Sonnet 5.5 (aanbevolen)</option><option value="claude-haiku-5-5">Claude Haiku 5.5 (goedkoper, korter)</option></select><button class="secondary" id="atest" type="button">Test</button></div>
+      <div class="hint" id="astat"></div>
+    </div>
+
     <button class="primary" id="go" type="button">Plan de wandeling</button>
     <div id="perr" class="err hidden"></div>
   </section>
@@ -147,6 +156,7 @@ body.dark .leaflet-tile-pane{filter:brightness(.55) contrast(1.15)}
       <h2 id="rtitle" style="margin-top:8px">Jullie wandeling</h2>
       <div class="stats" id="rstats"></div>
       <div class="note" id="rnote"></div>
+      <div class="note" id="cstat"></div>
       <div class="btns">
         <button class="primary" id="startwalk" type="button" style="width:auto;padding:11px 18px;font-size:15px">▶ Start wandeling (GPS)</button>
         <button class="secondary" id="regen" type="button">↻ Andere route</button>
@@ -222,7 +232,17 @@ async function nativeJSON(H,url,opt,ms){
   if(r.status>=400)throw new Error("HTTP "+r.status+(r.data&&r.data.error?": "+r.data.error:""));
   return typeof r.data==="string"?JSON.parse(r.data):r.data;
 }
+function isNetErr(e){return /resolve host|failed to fetch|networkerror|network request failed|unable to connect|no address associated|timed out|timeout|geen antwoord binnen|econn|enotfound|internet|offline|connection (refused|reset|abort)|ssl|socket/i.test(String(e&&e.message||e));}
+let netIssue=false;
+function netBanner(on,extra){const b=$("netbanner");if(!b)return;if(!on){b.classList.add("hidden");return;}
+  b.textContent="📶 Geen of geen goede internetverbinding"+(extra?" ("+extra+")":"")+". Sommige wifi-netwerken (bedrijf, hotel, gastnetwerk) blokkeren deze diensten: probeer mobiele data of een ander netwerk.";b.classList.remove("hidden");}
 async function getJSON(url,opt,ms){
+  try{return await getJSONonce(url,opt,ms);}
+  catch(e){ if(e&&e.name==="AbortError"&&planAbort&&planAbort.signal.aborted)throw e;
+    if(isNetErr(e)){await sleep(2500);try{return await getJSONonce(url,opt,ms);}catch(e2){if(isNetErr(e2)){netIssue=true;netBanner(true,(url.split("/")[2]||""));}throw e2;}}
+    throw e;}
+}
+async function getJSONonce(url,opt,ms){
   ms=ms||20000;
   const H=capHttp(); if(H) return nativeJSON(H,url,opt,ms);
   if(opt&&opt.form){opt=Object.assign({},opt,{headers:Object.assign({"Content-Type":"application/x-www-form-urlencoded"},opt.headers||{}),body:Object.entries(opt.form).map(([k,v])=>k+"="+encodeURIComponent(v)).join("&")});delete opt.form;}
@@ -286,7 +306,7 @@ function makeAC(input,model){
         bt.querySelector(".a").textContent=[s.kind,s.address].filter(Boolean).join(" · ");
         bt.onclick=()=>choose(s);list.append(bt);});
       list.classList.remove("hidden");
-    }catch(e){ if(my!==seq)return; if(e.name==="AbortError"&&!slow)return; info(slow?"De zoekdienst antwoordt niet. Probeer het zo meteen opnieuw.":"Zoeken lukte niet ("+(e.message||e)+"). Controleer je internetverbinding."); }
+    }catch(e){ if(my!==seq)return; if(e.name==="AbortError"&&!slow)return; if(slow||isNetErr(e)||navigator.onLine===false){info("📶 Geen internet of je netwerk blokkeert de zoekdienst. Probeer mobiele data.");netBanner(true,"zoeken");}else info("Zoeken lukte niet ("+(e.message||e)+")."); }
   }
   input.addEventListener("input",()=>{model.text=input.value;model.sel=null;refresh();save();clearTimeout(timer);timer=setTimeout(search,350);});
   input.addEventListener("focus",()=>{if(!model.sel&&input.value.trim().length>=2)search();});
@@ -314,7 +334,8 @@ $("addwp").onclick=()=>{state.waypoints.push({text:"",sel:null});renderWps();con
 function renderChips(){const box=$("chips");box.innerHTML="";INTERESTS.forEach(t=>{const b=document.createElement("button");b.type="button";b.className="chip";b.textContent=t;b.setAttribute("aria-pressed",state.interests.has(t));b.onclick=()=>{state.interests.has(t)?state.interests.delete(t):state.interests.add(t);b.setAttribute("aria-pressed",state.interests.has(t));save();};box.append(b);});}
 function updSliders(){const m=+$("dur").value,v=+$("spd").value;$("durv").textContent=fmtDur(m);$("spdv").textContent=v.toFixed(1).replace(".",",")+" km/u";$("kmhint").textContent="Dat is ongeveer "+fmtKm(m/60*v)+" wandelen.";}
 ["dur","spd"].forEach(id=>$(id).addEventListener("input",()=>{updSliders();save();}));
-const DETAILS=[["kort","Kort","± 30 seconden: de essentie in een paar zinnen."],["normaal","Normaal","± 1 minuut: wat je ziet en waarom het bijzonder is."],["lang","Uitgebreid","± 2 à 3 minuten: inclusief de geschiedenis van het gebouw."]];
+const DETAILS=[["kort","Kort","± 1 minuut per stop: de essentie."],["normaal","Normaal","± 2 minuten per stop: wat je ziet, de geschiedenis en een anekdote."],["lang","Uitgebreid","± 3 minuten per stop, bij grote gebouwen tot 5 minuten."]];
+const DETAIL_WORDS={kort:[130,180],normaal:[270,400],lang:[420,700]};
 const DETAIL_CHARS={kort:380,normaal:950,lang:2400};
 state.detail="normaal";
 function renderDetail(){const box=$("detail");box.innerHTML="";DETAILS.forEach(([k,l,hint])=>{const b=document.createElement("button");b.type="button";b.className="chip";b.textContent=l;b.setAttribute("aria-pressed",state.detail===k);b.onclick=()=>{state.detail=k;renderDetail();save();};box.append(b);if(state.detail===k)$("detailhint").textContent=hint;});}
@@ -368,6 +389,118 @@ function scoreOf(t,cats,ints){
   if(t.heritage)s+=1;
   if(cafe)s-=1.5;
   return Math.max(s,0);
+}
+
+/* ================= Claude: eigen opzoekwerk en uitleg ================= */
+const CLAUDE_URL="https://api.anthropic.com/v1/messages",CLAUDE_VERSION="2026-10-21";
+function apiKey(){return (store.get("akey")||"").trim();}
+function claudeModel(){return store.get("amodel")||"claude-sonnet-5-5";}
+async function claudeCall(body,ms){
+  const key=apiKey();if(!key)throw new Error("geen API-sleutel");
+  const headers={"x-api-key":key,"anthropic-version":CLAUDE_VERSION,"content-type":"application/json","anthropic-dangerous-direct-browser-access":"true"};
+  const H=capHttp();let status,data;
+  if(H){const r=await Promise.race([H.request({url:CLAUDE_URL,method:"POST",headers,data:body,responseType:"json",connectTimeout:ms,readTimeout:ms}),new Promise((_,rej)=>setTimeout(()=>rej(new Error("geen antwoord binnen "+Math.round(ms/1000)+" s")),ms))]);
+    status=r.status;data=typeof r.data==="string"?JSON.parse(r.data):r.data;}
+  else{const c=new AbortController();const t=setTimeout(()=>c.abort(),ms);
+    try{const r=await fetch(CLAUDE_URL,{method:"POST",headers,body:JSON.stringify(body),signal:c.signal});status=r.status;data=await r.json();}finally{clearTimeout(t);}}
+  if(status>=400){const m=data&&data.error&&data.error.message||("HTTP "+status);
+    throw new Error(status===401?"API-sleutel ongeldig":status===429?"te veel aanvragen, even wachten":status===529?"Claude is even overbelast":m);}
+  return data;
+}
+async function claudeAsk(prompt,opt){
+  opt=opt||{};
+  const tools=opt.search?[{type:"web_search_20250305",name:"web_search",max_uses:opt.search}]:undefined;
+  const messages=[{role:"user",content:prompt}];
+  for(let i=0;i<4;i++){
+    const body={model:opt.model||claudeModel(),max_tokens:opt.maxTokens||6000,messages};
+    if(opt.system)body.system=opt.system;if(tools)body.tools=tools;
+    let r;
+    try{r=await claudeCall(body,opt.ms||120000);}
+    catch(e){if(/te veel aanvragen|overbelast/.test(e.message)&&(opt._retries=(opt._retries||0)+1)<=3){await sleep(4000*opt._retries);i--;continue;}if(isNetErr(e)){netIssue=true;netBanner(true,"Claude");}throw e;}
+    if(r.stop_reason==="pause_turn"){messages.push({role:"assistant",content:r.content});continue;}
+    const blocks=r.content||[];let lastTool=-1;blocks.forEach((b,k)=>{if(b.type==="web_search_tool_result"||b.type==="server_tool_use")lastTool=k;});
+    const txt=blocks.slice(lastTool+1).filter(b=>b.type==="text").map(b=>b.text).join("").trim();
+    const srcs=[];blocks.forEach(b=>(b.citations||[]).forEach(c=>{if(c.url&&!srcs.some(s=>s.url===c.url))srcs.push({url:c.url,title:c.title||c.url});}));
+    return {text:txt,sources:srcs.slice(0,4),usage:r.usage};
+  }
+  throw new Error("Claude gaf geen volledig antwoord");
+}
+const GUIDE_SYSTEM="Je bent een ervaren, warme en nieuwsgierige stadsgids die een kleine groep vrienden rondleidt. Je spreekt vlot, natuurlijk Nederlands (Vlaamse woordkeuze mag) dat bedoeld is om voorgelezen te worden. Je verzint nooit feiten: wat je niet kunt bevestigen, laat je weg. Je houdt van lokale verhalen, anekdotes en details die toeristen meestal missen.";
+function cityOf(){const a=(state.end.sel&&state.end.sel.address)||(state.start.sel&&state.start.sel.address)||"";const parts=a.split(",").map(x=>x.trim());return parts.length>=2?parts[parts.length-2].replace(/^\d+\s*/,""):parts[0]||"";}
+async function claudeStopText(s){
+  const [w,wBig]=DETAIL_WORDS[state.detail]||DETAIL_WORDS.normaal;
+  const facts=[s.type&&("type: "+s.type),s.tags&&s.tags.start_date&&("bouwjaar volgens kaart: "+s.tags.start_date),s.tags&&s.tags.architect&&("architect volgens kaart: "+s.tags.architect),s.why&&("waarom voorgesteld: "+s.why)].filter(Boolean).join("; ");
+  const prompt=`Schrijf de gesproken uitleg voor deze stop van onze stadswandeling.
+
+Plek: ${s.name}
+Stad: ${cityOf()}
+Coördinaten: ${s.lat.toFixed(5)}, ${s.lon.toFixed(5)}
+${facts?"Wat de kaart weet: "+facts+"\n":""}${s.tip?"Tip van reizigers (Wikivoyage): "+s.tip.text+"\n":""}Interesses van de groep: ${[...state.interests].join(", ")||"algemeen"}
+
+Zoek eerst kort op (hoogstens 3 zoekopdrachten) om de feiten te controleren: geschiedenis, bouw, architect of kunstenaar, wat je er vandaag ziet, opvallende anekdotes en eventueel een lokale tip.
+
+Lengte: hoogstens ${w} woorden. Alleen als dit een groot of zeer belangrijk monument is (kathedraal, grote basiliek, kasteel, paleis, groot museum) mag je tot ${wBig} woorden gaan.
+Vorm: doorlopende gesproken tekst, geen opsommingen, geen titels, geen markdown, geen bronvermeldingen of links in de tekst. Begin meteen met het verhaal (geen inleiding zoals "Hier is"). Sluit af met één concreet detail om naar te kijken.
+Vind je weinig betrouwbare informatie, schrijf dan kort (hoogstens 60 woorden) wat je ziet, zonder iets te verzinnen.`;
+  return await claudeAsk(prompt,{search:3,system:GUIDE_SYSTEM,maxTokens:wBig*4+3000,ms:150000});
+}
+async function claudeSuggest(line,bufKm,ints,mins){
+  const pts=samplePoints(line,0.4,12).map(p=>p.lat.toFixed(4)+","+p.lon.toFixed(4)).join(" → ");
+  const prompt=`We maken een stadswandeling in ${cityOf()} van "${state.start.sel.name}" naar "${state.end.sel.name}". De wandelroute loopt ongeveer langs deze punten: ${pts}.
+Interesses: ${[...ints].join(", ")||"algemeen"}. Totale tijd: ${mins} minuten.
+
+Stel tot 14 plekken voor die op of vlak bij deze route liggen (hoogstens ${Math.round(bufKm*1000)} meter ervan). Geef voorrang aan lokale, minder toeristische plekjes en verborgen parels, aangevuld met de belangrijkste bezienswaardigheden die je echt niet mag missen. Gebruik gerust kort de zoekfunctie (hoogstens 3 zoekopdrachten). Enkel plekken die echt bestaan.
+
+Antwoord ALLEEN met JSON, zonder uitleg ervoor of erna:
+[{"name":"officiële naam","search":"naam + straat + stad, zo dat een kaart het vindt","why":"één zin waarom","category":"een van: ${INTERESTS.join(", ")}","big":true/false}]`;
+  const r=await claudeAsk(prompt,{search:3,maxTokens:6000,ms:150000});
+  const m=r.text.match(/\[[\s\S]*\]/);if(!m)return [];
+  let arr=[];try{arr=JSON.parse(m[0]);}catch(e){return [];}
+  return arr.filter(x=>x&&x.name).slice(0,14);
+}
+async function geocodeNear(q,near){
+  try{const url=PHOTON+"?limit=3&q="+encodeURIComponent(q)+(near?"&lat="+near.lat+"&lon="+near.lon:"");
+    const j=await getJSON(url,null,12000);const f=(j.features||[])[0];if(!f)return null;return {lat:f.geometry.coordinates[1],lon:f.geometry.coordinates[0]};}catch(e){return null;}
+}
+async function claudeCandidates(line,bufKm,ints,mins){
+  const sug=await claudeSuggest(line,bufKm,ints,mins);
+  const mid={lat:line[Math.floor(line.length/2)][0],lon:line[Math.floor(line.length/2)][1]};
+  const out=[];
+  for(const s of sug){
+    const g=await geocodeNear(s.search||s.name,mid);if(!g)continue;
+    const d=Math.min(...line.map(p=>hav({lat:p[0],lon:p[1]},g)));
+    if(d>bufKm*1.2+0.2)continue;
+    const cats=[INTERESTS.includes(s.category)?s.category:"Verborgen plekjes"];
+    out.push({id:"cl:"+s.name,lat:g.lat,lon:g.lon,name:s.name,tags:{},cats,why:s.why||"",big:!!s.big,score:5+(cats.some(c=>ints.has(c))?3:0)+(s.big?1:0),kind:"sight",type:(s.category||"bezienswaardigheid").toLowerCase()});
+  }
+  return out;
+}
+let claudeRun=0;
+async function fillClaudeTexts(onlyMissing){
+  if(!route||!apiKey())return;
+  const my=++claudeRun;
+  const todo=route.stops.map((s,i)=>i).filter(i=>route.stops[i].kind==="sight"&&(!onlyMissing||route.stops[i].needsClaude));
+  if(!todo.length){$("cstat").textContent="";return;}
+  let done=0,fail=0,lastErr="";
+  const upd=()=>{$("cstat").textContent=done+fail<todo.length?"✍ Claude schrijft de uitleg: "+done+" van "+todo.length+" klaar…":(fail?"⚠ "+fail+" uitleg(s) niet gelukt ("+lastErr+"). Tik op 'Route importeren' om opnieuw te proberen.":"✓ Alle uitleg geschreven door Claude.");};
+  upd();
+  const queue=todo.slice();
+  async function worker(){
+    while(queue.length&&my===claudeRun){
+      const i=queue.shift();const s=route.stops[i];
+      try{const r=await claudeStopText(s);
+        if(r.text&&r.text.length>30){s.text=r.text;s.lang="nl";s.src={claude:true,sources:r.sources};s.needsClaude=false;}
+        else throw new Error("leeg antwoord");
+        done++;
+        const d=$("stop"+i);if(d){d.querySelector(".stext").textContent=s.text;renderSrc(d.querySelector(".src"),s);}
+        if(route.imported)route.imported=null;
+        store.set("route",route);
+      }catch(e){fail++;lastErr=e.message||String(e);}
+      if(my===claudeRun)upd();
+    }
+  }
+  await Promise.all([worker(),worker(),worker()]);
+  if(my===claudeRun&&typeof impStatus==="function")impStatus();
 }
 
 /* ================= Wikipedia als bron van bezienswaardigheden ================= */
@@ -602,9 +735,11 @@ async function plan(alt){
   if(!state.start.sel||!state.end.sel){showErr("Kies een vertrek- en eindpunt uit de suggestielijst.");return;}
   const missing=pts.findIndex(p=>!p.sel);
   if(missing>=0){showErr("Tussenpunt '"+pts[missing].text+"' is niet gekozen uit de lijst. Kies een suggestie of verwijder het.");return;}
+  if(navigator.onLine===false){showErr("📶 Je toestel is offline. Zet wifi of mobiele data aan en probeer opnieuw.");return;}
+  netIssue=false;netBanner(false);
   save();stopSpeaking();stopWalk();stopSim();planErrs=[];$("steps").innerHTML="";curStep=null;$("fatal").classList.add("hidden");show("loading");
   planAbort=new AbortController();const pa=planAbort;
-  const overall=setTimeout(()=>pa.abort(),120000);
+  const overall=setTimeout(()=>pa.abort(),apiKey()?240000:120000);
   const mins=+$("dur").value,spd=+$("spd").value,target=mins/60*spd;
   const ints=new Set(state.interests);
   const fixed=pts.map((p,i)=>({lat:p.sel.lat,lon:p.sel.lon,name:p.sel.name,address:p.sel.address,kind:i===0?"start":i===pts.length-1?"end":"waypoint",fixed:true}));
@@ -637,17 +772,17 @@ async function plan(alt){
       });
       cands=[...seen.values()].filter(c=>c.score>0);
       stepNote(cands.length+" gevonden in OpenStreetMap");
-    }catch(e){ if(pa.signal.aborted)throw e; stepFail("OpenStreetMap-servers waren te druk ("+(e.message||e)+"); bezienswaardigheden komen nu uit Wikipedia en Wikivoyage"); }
-    step("Wikipedia doorzoeken");
-    try{
-      const cc=(pts.map(p=>p.sel&&p.sel.cc).find(Boolean)||"");
-      const langs=[...new Set(["nl","en",CC_LANG[cc]||"en"])];
-      const line=(base.geom&&base.geom.length>1)?base.geom:fixed.map(p=>[p.lat,p.lon]);
-      const wc=await wikiCandidates(line,Math.max(400,Math.min(1500,bufKm*700)),langs,ints);
-      const before=cands.length;cands=mergeCands(cands,wc);
-      if(alt)cands.forEach(c=>{if(c.fromWiki)c.score*=0.4+Math.random()*1.2;});
-      stepNote(wc.length+" artikels, "+(cands.length-before)+" extra plekken");
-    }catch(e){ if(pa.signal.aborted)throw e; stepFail("Wikipedia niet bereikbaar ("+(e.message||e)+")"); }
+    }catch(e){ if(pa.signal.aborted)throw e; stepFail("OpenStreetMap-servers waren te druk ("+(e.message||e)+"); bezienswaardigheden komen nu van Claude en Wikivoyage"); }
+    if(apiKey()){
+      step("Claude zoekt plekjes langs de route");
+      try{
+        const line=(base.geom&&base.geom.length>1)?base.geom:fixed.map(p=>[p.lat,p.lon]);
+        const cc2=await claudeCandidates(line,Math.max(0.3,Math.min(1.2,bufKm*0.7)),ints,mins);
+        const before=cands.length;cands=mergeCands(cands,cc2);
+        if(alt)cands.forEach(c=>{if(c.id.startsWith("cl:"))c.score*=0.4+Math.random()*1.2;});
+        stepNote(cc2.length+" voorstellen, "+(cands.length-before)+" extra plekken");
+      }catch(e){ if(pa.signal.aborted)throw e; stepFail("Claude kon geen plekjes voorstellen ("+(e.message||e)+")"); }
+    }
     step("Lokale tips zoeken (Wikivoyage)");
     try{
       const line=(base.geom&&base.geom.length>1)?base.geom:fixed.map(p=>[p.lat,p.lon]);
@@ -670,8 +805,7 @@ async function plan(alt){
     if(!rt){rt={km:rawKm(seq)*f,geom:null,legs:null,approx:true};}
     else if(rt.partial)stepFail(rt.partial+" deel(en) van de route konden niet berekend worden ("+rt.partialErr+"); daar staat een rechte lijn");
     step("Uitleg ophalen");
-    await addWikidataIds(seq.filter(p=>p.kind==="sight"));
-    const stops=seq.map(p=>({tip:p.tip||null,name:p.name,lat:p.lat,lon:p.lon,kind:p.kind,type:p.type||"",cats:p.cats||[],address:p.address||"",tags:p.tags||{},text:"",lang:"nl",src:null}));
+    const stops=seq.map(p=>({tip:p.tip||null,why:p.why||"",big:!!p.big,name:p.name,lat:p.lat,lon:p.lon,kind:p.kind,type:p.type||"",cats:p.cats||[],address:p.address||"",tags:p.tags||{},text:"",lang:"nl",src:null}));
     await addTexts(stops);
     step("Kaart tekenen");
     route={errs:planErrs.slice(),engine:rt.engine||"",stops,km:rt.km,geom:rt.geom,legs:rt.legs||null,steps:rt.steps||[],approx:!!rt.approx,target,mins,spd,poiCount:route_candCount,done:[]};
@@ -680,6 +814,7 @@ async function plan(alt){
   }catch(e){
     const why=pa.signal.aborted?(pa.userCancel?"geannuleerd":"het duurde langer dan 2 minuten"):(e&&e.message||String(e));
     stepFail(why);
+    if(netIssue||navigator.onLine===false)netBanner(true);
     const log=[...$("steps").children].map(li=>li.textContent).join(" · ");
     show("planner");showErr("Plannen mislukte: "+why+". Verloop: "+log);
   }finally{clearTimeout(overall);planAbort=null;}
@@ -733,47 +868,13 @@ function tagText(s){
   return parts.filter(Boolean).join(" ");
 }
 async function addTexts(stops){
-  const sights=stops.filter(s=>s.kind==="sight");
-  // 1. wikipedia-tag
-  const byLang={};
-  sights.forEach(s=>{const w=s.tags.wikipedia;if(w&&w.includes(":")){const [l,...r]=w.split(":");s._wl=l;s._wt=r.join(":");(byLang[l]=byLang[l]||[]).push(s._wt);}});
-  // 2. wikidata -> sitelinks (voorkeur nl)
-  const qids=sights.filter(s=>s.tags.wikidata).map(s=>s.tags.wikidata);
-  if(qids.length){
-    for(let i=0;i<qids.length;i+=40){
-      try{
-        const j=await getJSON("https://www.wikidata.org/w/api.php?action=wbgetentities&props=sitelinks&sitefilter=nlwiki|enwiki|itwiki|frwiki|dewiki|eswiki&format=json&origin=*&ids="+qids.slice(i,i+40).join("|"),null,15000);
-        sights.forEach(s=>{const e=s.tags.wikidata&&j.entities&&j.entities[s.tags.wikidata];if(!e||!e.sitelinks)return;
-          const nl=e.sitelinks.nlwiki;
-          if(nl){ if(s._wl!=="nl"){s._wl="nl";s._wt=nl.title;(byLang.nl=byLang.nl||[]).push(nl.title);} }
-          else if(!s._wl){const any=["enwiki","itwiki","frwiki","dewiki","eswiki"].map(k=>e.sitelinks[k]).find(Boolean);if(any){s._wl=any.site.replace("wiki","");s._wt=any.title;(byLang[s._wl]=byLang[s._wl]||[]).push(any.title);}}
-        });
-      }catch(e){}
-    }
-  }
-  // 3. geosearch in nl-wikipedia voor de rest
-  const rest=sights.filter(s=>!s._wl).slice(0,14);
-  await Promise.all(rest.map(async s=>{
-    try{
-      const j=await getJSON(`https://nl.wikipedia.org/w/api.php?action=query&list=geosearch&gscoord=${s.lat}|${s.lon}&gsradius=120&gslimit=6&format=json&origin=*`,null,12000);
-      const words=s.name.toLowerCase().split(/[\s\-']+/).filter(w=>w.length>3);
-      const hit=(j.query&&j.query.geosearch||[]).find(g=>words.some(w=>g.title.toLowerCase().includes(w)));
-      if(hit){s._wl="nl";s._wt=hit.title;(byLang.nl=byLang.nl||[]).push(hit.title);}
-    }catch(e){}
-  }));
-  // fetch extracts
-  const res={};
-  const lim=DETAIL_CHARS[state.detail]||950,long=state.detail==="lang";
-  await Promise.all(Object.entries(byLang).map(async([l,ts])=>{res[l]=await wikiExtracts(l,[...new Set(ts)],long);}));
+  const lim=DETAIL_CHARS[state.detail]||950;
   stops.forEach(s=>{
-    const ex=s._wl&&res[s._wl]&&res[s._wl][s._wt];
-    if(ex&&ex.text&&ex.text.length>40){
-      if(long){s.full=ex.text;s.text=composeLong(ex.text,lim);} else s.text=trimText(introOf(ex.text),lim);
-      s.lang=s._wl;s.src={lang:s._wl,title:ex.title};}
-    else if(s.tip){s.text=trimText(s.tip.text,lim);s.lang=s.tip.lang;s.src={wv:true,lang:s.tip.lang,title:s.tip.page};s.tipUsed=true;}
+    if(s.kind!=="sight"){s.text=tagText(s);s.lang="nl";return;}
+    if(s.tip){s.text=trimText(s.tip.text,lim);s.lang=s.tip.lang;s.src={wv:true,lang:s.tip.lang,title:s.tip.page};}
+    else if(s.why){s.text=s.name+": "+s.why;s.lang="nl";}
     else{s.text=tagText(s);s.lang="nl";}
-    if(s.tip&&!s.tipUsed&&s.tip.lang===s.lang&&state.detail!=="kort"){s.text+="\n\nLokale tip: "+trimText(s.tip.text,350);}
-    delete s._wl;delete s._wt;
+    s.needsClaude=true;
   });
 }
 
@@ -796,6 +897,8 @@ function showResult(){
   if(route.errs&&route.errs.length)note.push("Details: "+route.errs.join(" · "));
   $("rnote").textContent=note.join(" ");
   drawMap();renderStops();renderVoiceSel();impStatus();
+  if(apiKey()&&route.stops.some(s=>s.needsClaude))fillClaudeTexts(true);
+  else $("cstat").textContent=apiKey()?"":"Tip: voeg bij de instellingen een Claude API-sleutel toe voor uitgebreide uitleg per stop.";
 }
 function drawMap(){
   if(!window.L){$("map").innerHTML='<div class="acinfo">De kaart kon niet laden.</div>';return;}
@@ -826,21 +929,20 @@ function renderStops(){
     d.querySelector(".sname").textContent=s.name;
     d.querySelector(".smeta").textContent=lbl+leg;
     d.querySelector(".stext").textContent=s.text;
-    const src=d.querySelector(".src");
-    if(s.src&&s.src.wv){const a=document.createElement("a");a.href=`https://${s.src.lang}.wikivoyage.org/wiki/`+encodeURIComponent(s.src.title.replace(/ /g,"_"));a.target="_blank";a.rel="noopener";a.textContent="Wikivoyage"+(s.src.lang!=="nl"?" ("+s.src.lang+")":"");src.append("Bron: ",a);}
-    else if(s.src){const a=document.createElement("a");a.href=`https://${s.src.lang}.wikipedia.org/wiki/`+encodeURIComponent(s.src.title.replace(/ /g,"_"));a.target="_blank";a.rel="noopener";a.textContent="Wikipedia"+(s.src.lang!=="nl"?" ("+s.src.lang+")":"");src.append("Bron: ",a);}
-    else if(s.kind==="sight")src.textContent="Bron: OpenStreetMap-gegevens";
+    renderSrc(d.querySelector(".src"),s);
     d.querySelector(".shead").onclick=()=>{d.classList.contains("open")?d.classList.remove("open","active"):openStop(i,false);};
     const btns=d.querySelector(".btns");
     const sp=btn("🔊 Voorlezen");sp.onclick=()=>toggleSpeak(sp,s.name+". "+s.text,s.lang);btns.append(sp);
-    if(s.src&&!s.src.wv){const m=btn("📖 Vertel meer");m.onclick=()=>tellMore(i,m,d);btns.append(m);}
-    if(s.kind==="sight"){const city=(state.end.sel&&state.end.sel.address||"").split(",").slice(-2,-1)[0]||"";
-      const q=encodeURIComponent((s.name+" "+city).trim());
-      const ao=document.createElement("a");ao.className="secondary";ao.target="_blank";ao.rel="noopener";ao.href="https://www.atlasobscura.com/search?q="+q;ao.textContent="🔎 Atlas Obscura";btns.append(ao);
-      const ta=document.createElement("a");ta.className="secondary";ta.target="_blank";ta.rel="noopener";ta.href="https://www.tripadvisor.com/Search?q="+q;ta.textContent="🔎 Tripadvisor";btns.append(ta);}
     if(i>0){const a=document.createElement("a");a.className="secondary";a.href=gUrl(route.stops[i-1],s);a.target="_blank";a.rel="noopener";a.textContent="🧭 Google Maps";btns.append(a);}
     box.append(d);
   });
+}
+function renderSrc(el,s){
+  el.innerHTML="";
+  if(s.src&&s.src.claude){el.append("Uitleg: Claude"+(s.src.sources&&s.src.sources.length?" · bronnen: ":""));
+    (s.src.sources||[]).forEach((x,k)=>{const a=document.createElement("a");a.href=x.url;a.target="_blank";a.rel="noopener";a.textContent=(x.url.split("/")[2]||x.title).replace(/^www\./,"");if(k)el.append(", ");el.append(a);});}
+  else if(s.src&&s.src.wv){const a=document.createElement("a");a.href=`https://${s.src.lang}.wikivoyage.org/wiki/`+encodeURIComponent(s.src.title.replace(/ /g,"_"));a.target="_blank";a.rel="noopener";a.textContent="Wikivoyage"+(s.src.lang!=="nl"?" ("+s.src.lang+")":"");el.append("Voorlopige tekst: ",a,apiKey()?" · Claude schrijft de uitleg…":"");}
+  else if(s.kind==="sight")el.textContent=apiKey()?"Voorlopige tekst · Claude schrijft de uitleg…":"Bron: OpenStreetMap-gegevens · voeg een Claude-sleutel toe voor uitgebreide uitleg";
 }
 function btn(t){const b=document.createElement("button");b.type="button";b.className="secondary";b.textContent=t;return b;}
 function openStop(i,scroll){
@@ -1216,10 +1318,8 @@ async function importRoute(){
   let lock=null;try{if(navigator.wakeLock)lock=await navigator.wakeLock.request("screen");}catch(e){}
   const t0=Date.now();
   try{
-    // 1. volledige teksten
-    st.textContent="Teksten ophalen…";
-    const byLang={};route.stops.forEach(s=>{if(s.src&&!s.full)(byLang[s.src.lang]=byLang[s.src.lang]||[]).push(s.src.title);});
-    for(const [l,ts] of Object.entries(byLang)){const r=await wikiExtracts(l,ts,true);route.stops.forEach(s=>{if(s.src&&s.src.lang===l&&r[s.src.title])s.full=r[s.src.title].text;});}
+    // 1. uitleg door Claude afwerken
+    if(apiKey()&&route.stops.some(s=>s.needsClaude)){st.textContent="Claude schrijft de uitleg…";await fillClaudeTexts(true);}
     store.set("route",route);bar.style.width="10%";
     // 2. stem
     if(ai){
@@ -1255,6 +1355,12 @@ document.addEventListener("visibilitychange",()=>{
 
 /* ================= events ================= */
 $("go").onclick=()=>plan(false);
+{const k=store.get("akey");if(k)$("akey").value=k;const m=store.get("amodel");if(m)$("amodel").value=m;
+ $("akey").oninput=()=>store.set("akey",$("akey").value.trim());$("amodel").onchange=()=>store.set("amodel",$("amodel").value);
+ $("atest").onclick=async()=>{store.set("akey",$("akey").value.trim());$("astat").textContent="Testen…";
+   try{const r=await claudeAsk("Antwoord met exact het woord: OK",{maxTokens:2000,ms:60000});$("astat").textContent=/OK/i.test(r.text)?"✓ Sleutel werkt.":"Antwoord ontvangen: "+r.text.slice(0,60);}
+   catch(e){$("astat").textContent="✗ "+(e.message||e);}};}
+window.addEventListener("online",()=>netBanner(false));window.addEventListener("offline",()=>netBanner(true,"toestel offline"));
 {const q=store.get("quiet");if(q===false)$("quiet").checked=false;$("quiet").onchange=()=>store.set("quiet",$("quiet").checked);}
 $("cancel").onclick=()=>{if(planAbort){planAbort.userCancel=true;planAbort.abort();}};
 $("regen").onclick=()=>plan(true);
