@@ -96,6 +96,7 @@ body.dark .leaflet-tile-pane{filter:brightness(.55) contrast(1.15)}
   <div id="fatal" class="err hidden" style="margin:0 0 12px"></div>
   <h1>Stadswandeling</h1>
   <p class="sub">Van A naar B langs de mooiste plekken, op jouw tempo. Met kaart, GPS en voorgelezen uitleg.</p>
+  <div id="appver" style="position:fixed;right:10px;bottom:8px;font-size:11px;color:var(--muted);opacity:.8;z-index:900">versie __APP_VERSION__</div>
 
   <section id="planner">
     <div class="card">
@@ -1087,6 +1088,7 @@ $("saver").onchange=applySaver;
 {const sv=store.get("saver");if(sv===false)$("saver").checked=false;applySaver();}
 $("vrate").oninput=()=>{store.set("vrate",$("vrate").value);$("vratev").textContent="× "+(+$("vrate").value).toFixed(2).replace(".",",");};
 $("vtest").onclick=()=>toggleSpeak($("vtest"),"Hallo! Dit is de stem die jullie tijdens de wandeling begeleidt.","nl");
+{const v=$("appver");if(v&&v.textContent.includes("__APP_"))v.textContent="webversie";}
 load();
 })();
 </script>
