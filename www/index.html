@@ -132,11 +132,28 @@ body.dark .leaflet-tile-pane{filter:brightness(.55) contrast(1.15)}
     </div>
 
     <div class="card">
-      <label class="lbl" for="akey">Claude-uitleg</label>
-      <div class="hint" style="margin-bottom:8px">Claude zoekt zelf informatie op en schrijft per stop een gesproken uitleg. Daarvoor is een eigen API-sleutel nodig (platform.claude.com, betalen per gebruik). De sleutel blijft enkel op dit toestel.</div>
-      <input type="password" id="akey" placeholder="sk-ant-…" autocomplete="off">
-      <div class="row" style="margin-top:8px"><select id="amodel" style="flex:1"><option value="claude-sonnet-5-5">Claude Sonnet 5.5 (aanbevolen)</option><option value="claude-haiku-5-5">Claude Haiku 5.5 (goedkoper, korter)</option></select><button class="secondary" id="atest" type="button">Test</button></div>
-      <div class="hint" id="astat"></div>
+      <label class="lbl">Werkwijze</label>
+      <div class="chips" id="modechips">
+        <button type="button" class="chip" data-mode="free">🟢 Gratis</button>
+        <button type="button" class="chip" data-mode="claude">💳 Claude (betalend)</button>
+      </div>
+      <div class="hint" id="modehint" style="font-size:14px;margin-top:8px"></div>
+      <div id="claudebox" class="hidden" style="margin-top:10px">
+        <input type="password" id="akey" placeholder="Plak hier je API-sleutel (sk-ant-…)" autocomplete="off">
+        <div class="row" style="margin-top:8px"><select id="amodel" style="flex:1"><option value="claude-sonnet-5-5">Claude Sonnet 5.5 (aanbevolen)</option><option value="claude-haiku-5-5">Claude Haiku 5.5 (goedkoper, korter)</option></select><button class="secondary" id="atest" type="button">Test</button></div>
+        <div class="hint" id="astat"></div>
+        <details style="margin-top:10px;font-size:14px">
+          <summary style="cursor:pointer;font-weight:600">Hoe maak ik een API-sleutel?</summary>
+          <ol style="padding-left:20px;margin:8px 0">
+            <li>Ga naar <a href="https://platform.claude.com/" target="_blank" rel="noopener">platform.claude.com</a> en maak een account aan of log in. Dat is de Claude Console, los van claude.ai.</li>
+            <li><b>Let op:</b> je abonnement op claude.ai en de kaart die je daar koppelde, gelden hier niet. De Console wordt apart betaald, met vooraf gekocht tegoed.</li>
+            <li>Ga naar <b>Settings › Billing</b>, kies <b>Buy credits</b> en koop een klein bedrag, bijvoorbeeld 5 à 10 dollar. Zet automatisch bijladen uit als je wil dat het nooit meer kost dan je oplaadde.</li>
+            <li>Ga naar <a href="https://platform.claude.com/settings/keys" target="_blank" rel="noopener">Settings › API keys</a> en maak een nieuwe sleutel aan, bijvoorbeeld met de naam "Stadswandeling".</li>
+            <li>Kopieer de sleutel meteen. Hij begint met <code>sk-ant-</code>. Plak hem hierboven en tik op <b>Test</b>.</li>
+          </ol>
+          <div class="hint">De sleutel blijft alleen op dit toestel. Wie hem heeft, kan op jouw tegoed werken: deel hem dus niet.</div>
+        </details>
+      </div>
     </div>
 
     <button class="primary" id="go" type="button">Plan de wandeling</button>
@@ -154,6 +171,7 @@ body.dark .leaflet-tile-pane{filter:brightness(.55) contrast(1.15)}
     <div class="card">
       <button class="toplink" id="back" type="button">← Instellingen aanpassen</button>
       <h2 id="rtitle" style="margin-top:8px">Jullie wandeling</h2>
+      <div id="rmode" style="display:inline-block;border-radius:999px;padding:4px 12px;font-size:13.5px;font-weight:600;margin-bottom:6px"></div>
       <div class="stats" id="rstats"></div>
       <div class="note" id="rnote"></div>
       <div class="note" id="cstat"></div>
@@ -393,10 +411,31 @@ function scoreOf(t,cats,ints){
 
 /* ================= Claude: eigen opzoekwerk en uitleg ================= */
 const CLAUDE_URL="https://api.anthropic.com/v1/messages",CLAUDE_VERSION="2026-10-21";
-function apiKey(){return (store.get("akey")||"").trim();}
+function rawKey(){return (store.get("akey")||"").trim();}
+function appMode(){return store.get("mode")||"free";}
+function apiKey(){return appMode()==="claude"?rawKey():"";}
+const PRICE={"claude-sonnet-5-5":{in:2,out:10},"claude-haiku-5-5":{in:1,out:5}};
+function usageCost(u,model){if(!u)return 0;const p=PRICE[model]||PRICE["claude-sonnet-5-5"];
+  const inTok=(u.input_tokens||0)+(u.cache_creation_input_tokens||0)+(u.cache_read_input_tokens||0)*0.1;
+  return inTok/1e6*p.in+(u.output_tokens||0)/1e6*p.out+((u.server_tool_use&&u.server_tool_use.web_search_requests)||0)*0.01;}
+let sessionCost=0;
+function addCost(c){sessionCost+=c;if(route){route.cost=(route.cost||0)+c;store.set("route",route);}updModeBadges();}
+function fmtUsd(x){return "$"+x.toFixed(2).replace(".",",");}
+function updModeBadges(){
+  const m=appMode(),k=rawKey();
+  document.querySelectorAll("#modechips .chip").forEach(b=>b.setAttribute("aria-pressed",b.dataset.mode===m));
+  $("claudebox").classList.toggle("hidden",m!=="claude");
+  $("modehint").innerHTML=m==="free"
+    ?"<b>Gratis:</b> kaart, wandelroute, aanwijzingen en bezienswaardigheden uit OpenStreetMap en Wikivoyage, met korte teksten. Er wordt niets aangerekend."
+    :(k?"<b>Betalend:</b> Claude zoekt per stop informatie op en schrijft de uitleg. Dat wordt van je API-tegoed afgetrokken, ruw geschat 5 à 15 dollarcent per stop."
+       :"<b>Betalend, maar nog geen sleutel:</b> zonder API-sleutel werkt de app gratis verder. Hieronder lees je hoe je een sleutel aanmaakt.");
+  const rb=$("rmode");if(rb){
+    if(m==="claude"&&k){rb.textContent="💳 Betalende modus (Claude)"+(route&&route.cost?" · kost deze wandeling tot nu: ± "+fmtUsd(route.cost):"");rb.style.background="#fdf0e6";}
+    else{rb.textContent="🟢 Gratis modus, er wordt niets aangerekend";rb.style.background="#e8f4ef";}}
+}
 function claudeModel(){return store.get("amodel")||"claude-sonnet-5-5";}
 async function claudeCall(body,ms){
-  const key=apiKey();if(!key)throw new Error("geen API-sleutel");
+  const key=rawKey();if(!key)throw new Error("geen API-sleutel");
   const headers={"x-api-key":key,"anthropic-version":CLAUDE_VERSION,"content-type":"application/json","anthropic-dangerous-direct-browser-access":"true"};
   const H=capHttp();let status,data;
   if(H){const r=await Promise.race([H.request({url:CLAUDE_URL,method:"POST",headers,data:body,responseType:"json",connectTimeout:ms,readTimeout:ms}),new Promise((_,rej)=>setTimeout(()=>rej(new Error("geen antwoord binnen "+Math.round(ms/1000)+" s")),ms))]);
@@ -421,6 +460,7 @@ async function claudeAsk(prompt,opt){
     const blocks=r.content||[];let lastTool=-1;blocks.forEach((b,k)=>{if(b.type==="web_search_tool_result"||b.type==="server_tool_use")lastTool=k;});
     const txt=blocks.slice(lastTool+1).filter(b=>b.type==="text").map(b=>b.text).join("").trim();
     const srcs=[];blocks.forEach(b=>(b.citations||[]).forEach(c=>{if(c.url&&!srcs.some(s=>s.url===c.url))srcs.push({url:c.url,title:c.title||c.url});}));
+    try{addCost(usageCost(r.usage,body.model));}catch(e){}
     return {text:txt,sources:srcs.slice(0,4),usage:r.usage};
   }
   throw new Error("Claude gaf geen volledig antwoord");
@@ -495,7 +535,7 @@ async function fillClaudeTexts(onlyMissing){
         const d=$("stop"+i);if(d){d.querySelector(".stext").textContent=s.text;renderSrc(d.querySelector(".src"),s);}
         if(route.imported)route.imported=null;
         store.set("route",route);
-      }catch(e){fail++;lastErr=e.message||String(e);}
+      }catch(e){fail++;lastErr=/credit|balance|billing/i.test(String(e.message||e))?"onvoldoende tegoed op platform.claude.com":(e.message||String(e));}
       if(my===claudeRun)upd();
     }
   }
@@ -896,9 +936,9 @@ function showResult(){
   if(route.poiCount!=null)note.push(route.poiCount+" mogelijke bezienswaardigheden gevonden in de buurt; de beste "+sights+" passen in jullie tijd.");
   if(route.errs&&route.errs.length)note.push("Details: "+route.errs.join(" · "));
   $("rnote").textContent=note.join(" ");
-  drawMap();renderStops();renderVoiceSel();impStatus();
+  drawMap();renderStops();renderVoiceSel();impStatus();updModeBadges();
   if(apiKey()&&route.stops.some(s=>s.needsClaude))fillClaudeTexts(true);
-  else $("cstat").textContent=apiKey()?"":"Tip: voeg bij de instellingen een Claude API-sleutel toe voor uitgebreide uitleg per stop.";
+  else $("cstat").textContent=apiKey()?"":"Gratis modus: korte teksten. Kies bij Werkwijze 'Claude (betalend)' voor uitgebreide uitleg per stop.";
 }
 function drawMap(){
   if(!window.L){$("map").innerHTML='<div class="acinfo">De kaart kon niet laden.</div>';return;}
@@ -942,7 +982,7 @@ function renderSrc(el,s){
   if(s.src&&s.src.claude){el.append("Uitleg: Claude"+(s.src.sources&&s.src.sources.length?" · bronnen: ":""));
     (s.src.sources||[]).forEach((x,k)=>{const a=document.createElement("a");a.href=x.url;a.target="_blank";a.rel="noopener";a.textContent=(x.url.split("/")[2]||x.title).replace(/^www\./,"");if(k)el.append(", ");el.append(a);});}
   else if(s.src&&s.src.wv){const a=document.createElement("a");a.href=`https://${s.src.lang}.wikivoyage.org/wiki/`+encodeURIComponent(s.src.title.replace(/ /g,"_"));a.target="_blank";a.rel="noopener";a.textContent="Wikivoyage"+(s.src.lang!=="nl"?" ("+s.src.lang+")":"");el.append("Voorlopige tekst: ",a,apiKey()?" · Claude schrijft de uitleg…":"");}
-  else if(s.kind==="sight")el.textContent=apiKey()?"Voorlopige tekst · Claude schrijft de uitleg…":"Bron: OpenStreetMap-gegevens · voeg een Claude-sleutel toe voor uitgebreide uitleg";
+  else if(s.kind==="sight")el.textContent=apiKey()?"Voorlopige tekst · Claude schrijft de uitleg…":"Bron: OpenStreetMap-gegevens (gratis modus)";
 }
 function btn(t){const b=document.createElement("button");b.type="button";b.className="secondary";b.textContent=t;return b;}
 function openStop(i,scroll){
@@ -1356,10 +1396,12 @@ document.addEventListener("visibilitychange",()=>{
 /* ================= events ================= */
 $("go").onclick=()=>plan(false);
 {const k=store.get("akey");if(k)$("akey").value=k;const m=store.get("amodel");if(m)$("amodel").value=m;
- $("akey").oninput=()=>store.set("akey",$("akey").value.trim());$("amodel").onchange=()=>store.set("amodel",$("amodel").value);
+ document.querySelectorAll("#modechips .chip").forEach(b=>b.onclick=()=>{store.set("mode",b.dataset.mode);updModeBadges();});
+ $("akey").oninput=()=>{store.set("akey",$("akey").value.trim());updModeBadges();};$("amodel").onchange=()=>store.set("amodel",$("amodel").value);
  $("atest").onclick=async()=>{store.set("akey",$("akey").value.trim());$("astat").textContent="Testen…";
-   try{const r=await claudeAsk("Antwoord met exact het woord: OK",{maxTokens:2000,ms:60000});$("astat").textContent=/OK/i.test(r.text)?"✓ Sleutel werkt.":"Antwoord ontvangen: "+r.text.slice(0,60);}
-   catch(e){$("astat").textContent="✗ "+(e.message||e);}};}
+   try{const r=await claudeAsk("Antwoord met exact het woord: OK",{maxTokens:2000,ms:60000});$("astat").textContent=/OK/i.test(r.text)?"✓ Sleutel werkt. Je tegoed wordt gebruikt zolang 'Claude (betalend)' gekozen is.":"Antwoord ontvangen: "+r.text.slice(0,60);}
+   catch(e){const m=String(e.message||e);$("astat").textContent="✗ "+(/credit|balance|billing/i.test(m)?"Geen of onvoldoende tegoed: koop credits via Settings › Billing op platform.claude.com.":m);}};
+ updModeBadges();}
 window.addEventListener("online",()=>netBanner(false));window.addEventListener("offline",()=>netBanner(true,"toestel offline"));
 {const q=store.get("quiet");if(q===false)$("quiet").checked=false;$("quiet").onchange=()=>store.set("quiet",$("quiet").checked);}
 $("cancel").onclick=()=>{if(planAbort){planAbort.userCancel=true;planAbort.abort();}};
